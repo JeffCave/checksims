@@ -851,9 +851,9 @@ export default class DeepDiff extends EventTarget{
 	 */
 	async runAllCompares(){
 		if(this.runAllComparesIsRunning) return;
+		this.runAllComparesIsRunning = true;
 		await this.db;
 
-		this.runAllComparesIsRunning = true;
 		let allPairs = await this.Results;
 
 		let results = allPairs
