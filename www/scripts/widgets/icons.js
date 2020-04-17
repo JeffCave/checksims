@@ -28,6 +28,7 @@ const icons = Object.seal({
 	'visibility_off':'&#128683;',
 
 	'compressed':'&#128476;',
+	'microbe':'&#129440;',
 });
 
 export default icons;

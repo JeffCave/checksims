@@ -1,8 +1,3 @@
-'use strict';
-export {
-	DeepDiff
-};
-
 import "https://cdnjs.cloudflare.com/ajax/libs/pouchdb/7.0.0/pouchdb.min.js";
 import "./lib/pouchdb.upsert.min.js";
 import "https://cdnjs.cloudflare.com/ajax/libs/underscore.js/1.9.1/underscore-min.js";
@@ -16,19 +11,17 @@ import {Submission} from './submission/Submission.js';
 
 import * as utils from './util/misc.js';
 
-/*
-global _
-global CustomEvent
-global emit
-global Event
-global PouchDB
-global EventTarget
-*/
+
+export {
+	DeepDiff as default,
+	DeepDiff,
+};
+
 
 /**
  * CLI Entry point and main public API endpoint for DeepDiff.
  */
-export default class DeepDiff extends EventTarget{
+class DeepDiff extends EventTarget{
 
 	constructor() {
 		super();
@@ -46,6 +39,7 @@ export default class DeepDiff extends EventTarget{
 			submissions:{},
 			archives:[],
 		};
+		this.runAllComparesIsRunning = true;
 
 		this._.emit = {
 			load : async ()=>{
@@ -56,7 +50,15 @@ export default class DeepDiff extends EventTarget{
 			}
 		};
 
-		this.dbLoad();
+		this.dbLoad()
+			.then(()=>{return this.Submissions;})
+			.then(()=>{
+				setTimeout(()=>{
+					this.runAllComparesIsRunning = false;
+					this.runAllCompares();
+				},100);
+			})
+			;
 	}
 
 	get db(){
@@ -126,6 +128,7 @@ export default class DeepDiff extends EventTarget{
 				}
 				catch(e){
 					console.log('Database Connection is closing');
+					debugger;
 					let ignore = e.message.includes('database connection is closing');
 					if(!ignore){
 						throw e;
@@ -251,7 +254,7 @@ export default class DeepDiff extends EventTarget{
 					.map(d=>{
 						AlgorithmResults.Create(e.detail.doc,d.doc).then(result=>{
 							this.Refresh(result);
-						})
+						});
 					})
 					;
 				results = await Promise
@@ -374,7 +377,7 @@ export default class DeepDiff extends EventTarget{
 				return sub;
 			})
 			.filter(d=>{
-				let valid = (!d) === false;
+				let valid = d != false;
 				return valid;
 			});
 			return rows;
@@ -470,7 +473,7 @@ export default class DeepDiff extends EventTarget{
 	}
 	async Export(){
 		let db = await this.db;
-		let docs = db.allDocs({
+		let docs = await db.allDocs({
 			startkey: '_\ufff0',
 			endkey: '\ufff0',
 			include_docs: true
@@ -535,7 +538,7 @@ export default class DeepDiff extends EventTarget{
 			db.upsert(id,function(){
 				return {_deleted:true};
 			});
-		}
+		};
 		remover();
 	}
 
