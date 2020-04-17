@@ -26,7 +26,7 @@ import {swAlgoWebWorker} from './swAlgoWebWorker.js';
 	};
 });
 // also register a default one
-AlgorithmRegistry.processors['smithwaterman'] = AlgorithmRegistry.processors['smithwaterman-swAlgoGpu'];
+AlgorithmRegistry.processors['smithwaterman'] = AlgorithmRegistry.processors['smithwaterman-swAlgoCell'];
 
 // test to ensure the software is capable of running
 AlgorithmRegistry.processors['smithwaterman-swAlgoGpu'].available = (typeof window.OffscreenCanvas !== 'undefined');
