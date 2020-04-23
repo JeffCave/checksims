@@ -1,13 +1,13 @@
 /**
  * DO NOT IMPLEMENT AS MODULE
  *
- * This class is referenced by a webworker, which means it *must* not be 
+ * This class is referenced by a webworker, which means it *must* not be
  * implemented as a module until Firefox implements modules in webworkers.
  */
 'use strict';
 
 
-class SmithWatermanBase{
+class SmithWatermanBase extends EventTarget{
 
 	/**
 	 * Maximum area is 1 GB
@@ -39,6 +39,7 @@ class SmithWatermanBase{
 	}
 
 	constructor(name, a, b, opts){
+		super();
 		this._ = {
 			scores: {
 				match:+2,
@@ -156,6 +157,7 @@ class SmithWatermanBase{
 		if(this.onmessage){
 			this.onmessage(msg);
 		}
+		this.dispatchEvent(new CustomEvent('msg',{detail:msg}));
 		this.isPosting = false;
 	}
 
@@ -225,4 +227,3 @@ class SmithWatermanBase{
 	}
 	g.SmithWatermanBase = SmithWatermanBase;
 })();
-

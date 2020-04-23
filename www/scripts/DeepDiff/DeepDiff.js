@@ -11,6 +11,10 @@ import {Submission} from './submission/Submission.js';
 
 import * as utils from './util/misc.js';
 
+export {
+	DeepDiff as default,
+	DeepDiff,
+};
 
 export {
 	DeepDiff as default,
@@ -377,7 +381,7 @@ class DeepDiff extends EventTarget{
 				return sub;
 			})
 			.filter(d=>{
-				let valid = d != false;
+				let valid = (d != false);
 				return valid;
 			});
 			return rows;
@@ -793,6 +797,7 @@ class DeepDiff extends EventTarget{
 			//result.percentMatched = result.identicalTokens / result.totalTokens;
 			let completePct = (comparer.totalSize - comparer.remaining) -1;
 			completePct = completePct / comparer.totalSize;
+			completePct = Math.max(0,completePct);
 			result.percentMatched = completePct;
 			result.submissions.forEach((orig,i)=>{
 				//let sub = comparer.submissions[i];
@@ -855,6 +860,7 @@ class DeepDiff extends EventTarget{
 	async runAllCompares(){
 		if(this.runAllComparesIsRunning) return;
 		this.runAllComparesIsRunning = true;
+
 		await this.db;
 
 		let allPairs = await this.Results;

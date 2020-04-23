@@ -4,15 +4,22 @@
  * This class is referenced by a webworker, which means it *must* not be
  * implemented as a module until Firefox implements modules in webworkers.
  */
-
 importScripts('../../../lib/psGpu.js');
 importScripts('../swAlgoBase.js');
 
-'use strict';
-
 const utils = {
 	defer: function(func){
-		return setTimeout(func,0);
+		return new Promise((resolve,reject)=>{
+			setTimeout(async ()=>{
+				try{
+					let result = await func();
+					resolve(result);
+				}
+				catch(e){
+					reject(e);
+				}
+			},32);
+		});
 	}
 };
 
@@ -23,11 +30,236 @@ const modDir = [
 		[1,1]
 	];
 
-
-class swAlgoGpu extends SmithWatermanBase{
+class swTiler extends SmithWatermanBase{
 	constructor(name, a, b, opts){
 		super(name, a, b, opts);
 
+		if(!a && !b && name.name){
+			a = name.submissions[0];
+			b = name.submissions[1];
+			name = name.name;
+		}
+
+		this.TileSize = swTiler.TileSize;
+
+		this.name = name;
+		this.submissions = [a,b].map((s)=>{
+			s = { sub: s };
+			s.tileLen = Math.ceil(a.length / this.TileSize);
+			return s;
+		});
+		this.partial = new Map();
+		this.matrix = [];
+		this.chains = [];
+		this.remaining = this.submissions[0].tileLen * this.submissions[1].tileLen;
+		this.totalSize = this.remaining;
+
+		this.handlers = {
+			progress:[],
+			complete:[]
+		};
+
+		this.pause();
+		this.addToTile(0,0,'nw',JSON.parse(swTiler.TileEdgeDefault).pop());
+		this.start();
+	}
+
+
+	start(){
+		if(this.isPaused === true){
+			utils.defer(()=>{
+				this.calcBuffer();
+			});
+		}
+		this.isPaused = false;
+	}
+
+	stop(){
+		this.pause();
+
+		let msg = {type:'stopped',data:this.status};
+		msg.data.chains = this.chains;
+		msg.data.submissions = this.submissions;
+
+		if(this.remaining === 0){
+			msg.type = 'complete';
+		}
+
+		this.postMessage(msg);
+		this.destroy();
+	}
+
+	destroy(){
+	}
+
+	progress(){
+		this.postMessage({type:'progress', data:this.toJSON()});
+	}
+
+	async addToTile(x,y,origin,chain){
+		// bounds checking
+		if(x < 0 || y < 0){
+			return false;
+		}
+		if(x >= this.submissions[0].tileLength || y >= this.submissions[1].tileLength){
+			return false;
+		}
+		// lookup the data at that location
+		let index = this.CoordToIndex(x,y);
+		let cell = this.partial.get(index);
+		if(!cell){
+			// create it if necessary
+			cell = {
+				id:[x,y],
+			};
+			this.partial.set(index,cell);
+		}
+
+		// have we already processed this value?
+		if(origin in cell){
+			return false;
+		}
+
+		// initialize values that exist at the begining of the world
+		if(x === 0){
+			cell.w = JSON.parse(swTiler.TileEdgeDefault);
+		}
+		if(y === 0){
+			cell.n = JSON.parse(swTiler.TileEdgeDefault);
+		}
+		if(x === 0 || y === 0){
+			cell.nw = JSON.parse(swTiler.TileEdgeDefault).pop();
+		}
+
+		// set the values
+		cell[origin] = chain;
+
+		// have we calcuated up the three pre-requisites sufficiently to
+		// solve the problem?
+		if('n' in cell && 'w' in cell && 'nw' in cell){
+			// take it out of the pre-processing queue, and add it to the
+			// processing queue
+			this.partial.delete(index);
+			this.matrix.push(cell);
+		}
+
+		// if the pre-processing queue is empty, do the actual calcuations
+		if(this.partial.size === 0){
+			this.calcBuffer();
+		}
+
+		return cell;
+	}
+
+
+	async calcBuffer(){
+		this.calcBufferInstance = this.calcBufferInstance || utils.defer(async ()=>{
+
+			// this thing is supposed to be a multi-threaded thing. We may need
+			// a way to stop it
+			if(this.isPaused){
+				return false;
+			}
+
+			let tile = this.matrix.shift();
+			if(tile){
+				tile = await this.calcTile(tile);
+				this.remaining--;
+				this.progress();
+				// schedule the next processing cycle
+				this.calcBuffer();
+			}
+			else{
+				this.stop();
+			}
+
+			this.calcBufferInstance = null;
+			return tile;
+		});
+
+		return this.calcBufferInstance;
+	}
+
+
+	async calcTile(tile){
+
+		let lexememap = {enc:{},dec:[]};
+
+		let segs = [{},{}];
+		for(let s=0; s<segs.length; s++){
+			let seg = segs[s];
+			let sub = this.submissions[0].sub;
+			seg.start = tile.id[s] * this.TileSize;
+			seg.fin = seg.start + this.TileSize;
+			// TODO: Investigate potential one off
+			//seg.fin = Math.min(sub.length,seg.fin) - 1;
+			seg.fin = Math.min(sub.length,seg.fin);
+			seg.segment = sub.slice(seg.start,seg.fin);
+			for(let i=0; i<seg.segment.length; i++){
+				let val = seg.segment[i];
+				val = val.lexeme;
+				if(!(val in lexememap.enc)){
+					lexememap.enc[val] = lexememap.dec.length;
+					lexememap.dec.push(val);
+				}
+				seg.segment[i].lexeme = lexememap.enc[val];
+			}
+		}
+
+		tile.lexememap = lexememap;
+		tile.segments = segs;
+		let p = new Promise((resolve)=>{
+			let id = this.name + JSON.stringify(tile.id);
+			let a = segs[0].segment;
+			let b = segs[1].segment;
+			let opts = {};
+			let gpu = new swAlgoGpu(id,a,b,opts);
+			gpu.addEventListener('msg', (msg)=>{
+				msg = msg.detail;
+				if(msg.type === 'stopped'){
+					let c = gpu.finishedChains;
+					resolve(c);
+				}
+				else if (msg.type ==='progress'){
+					this.progress();
+				}
+			});
+			gpu.start();
+		});
+		try{
+			tile.finishedChains = await p;
+		}
+		catch(e){
+			console.error(e);
+		}
+
+		return tile;
+	}
+
+	CoordToIndex(x,y){
+		return y * this.submissions[0].tileLen + x;
+	}
+
+	IndexToCoord(i){
+		let len =this.submissions[0].tileLen;
+		let x = i/len;
+		let y = i%len;
+		return [x,y];
+	}
+
+}
+//swTiler.TileSize = (2**(16-1)) - 2;
+swTiler.TileSize = 600;
+swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
+	.fill(0)
+	.map(()=>{
+		return {score:0,chain:[],highscore:Number.MIN_SAFE_INTEGER};
+	});
+swTiler.TileEdgeDefault = JSON.stringify(swTiler.TileEdgeDefault);
+
+class swAlgoGpu extends SmithWatermanBase{
+	constructor(name, a, b, opts){
+		super(name,a,b,opts);
 		if(!a && !b && name.name){
 			a = name.submissions[0];
 			b = name.submissions[1];
@@ -52,14 +284,6 @@ class swAlgoGpu extends SmithWatermanBase{
 			(a.length * b.length) +
 			0;
 		this.totalSize = this.remaining;
-
-		this.submissions.forEach((sub,s)=>{
-			sub.forEach((lex,i)=>{
-				if(lex.lexeme > 65535){
-					throw new Error('Token '+name+'['+s+']['+i+'] is greater than 65535 ('+lex.lexeme+')');
-				}
-			});
-		});
 
 		this.handlers = {
 			progress:[],
@@ -92,8 +316,6 @@ class swAlgoGpu extends SmithWatermanBase{
 		this.gpu.run('initializeSpace');
 		this.remaining--;
 		this.postMessage({type:'progress', data:this.toJSON()});
-
-		this.start();
 	}
 
 	destroy(){
@@ -140,6 +362,13 @@ class swAlgoGpu extends SmithWatermanBase{
 		this.postMessage(msg);
 		this.destroy();
 	}
+
+	pause(){
+		this.isPaused = true;
+		this.postMessage({type:'pause'});
+	}
+
+
 
 	calc(){
 		let timeLimit = Date.now() + 100;
@@ -260,21 +489,7 @@ class swAlgoGpu extends SmithWatermanBase{
 					resolved.push(chain);
 				}
 			};
-			//let current = chain.history.length-1;
-			//let highwater = current;
-			//for(; current >=0; current--){
-			//	let c = chain.history[current];
-			//	let h = chain.history[highwater];
-			//	if(c.score >= h.score){
-			//		highwater = current;
-			//		continue;
-			//	}
-			//	let diff = h.score - c.score;
-			//	if(diff > this.ScoreTerminus){
-			//		PushChain(chain.slice(highwater,chain.length-1));
-			//		chain = chain.slice(0,current);
-			//	}
-			//}
+
 			PushChain(chain);
 		}
 		this.postMessage({type:'progress', data:this.toJSON()});
@@ -347,10 +562,6 @@ class swAlgoGpu extends SmithWatermanBase{
 		return resolved;
 	}
 
-	postMessage(msg){
-		//msg.html = this.html;
-		postMessage(msg);
-	}
 
 	get html(){
 		//if(this._html && this._htmlN >= 2){
@@ -581,6 +792,7 @@ const gpuFragSW = (`
 let matrix = null;
 
 
+
 onmessage = function(params){
 	if(matrix === null && params.data.action === 'start') {
 		console.log("Initializing web worker");
@@ -590,7 +802,11 @@ onmessage = function(params){
 		let b = params.data.submissions[1];
 		let opts = params.data.options;
 
-		matrix = new swAlgoGpu(id,a,b,opts);
+		matrix = new swTiler(id,a,b,opts);
+		matrix.addEventListener('msg',(msg)=>{
+			msg = msg.detail;
+			postMessage(msg);
+		});
 	}
 	if(matrix !== null){
 		if(params.data.action === 'start'){
