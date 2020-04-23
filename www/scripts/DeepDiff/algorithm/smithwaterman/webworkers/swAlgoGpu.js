@@ -53,6 +53,7 @@ class swTiler extends SmithWatermanBase{
 		this.chains = [];
 		this.remaining = this.submissions[0].tileLen * this.submissions[1].tileLen;
 		this.totalSize = this.remaining;
+		this.partialProgress = 0;
 
 		this.handlers = {
 			progress:[],
@@ -94,6 +95,17 @@ class swTiler extends SmithWatermanBase{
 
 	progress(){
 		this.postMessage({type:'progress', data:this.toJSON()});
+	}
+
+	get status(){
+		let tilesize = this.TileSize**2;
+		let partial = Math.floor(tilesize * this.partialProgress);
+
+		let s = super.status;
+		s.totalSize *= tilesize;
+		s.remaining *= tilesize;
+		s.remaining -= partial;
+		return s;
 	}
 
 	async addToTile(x,y,origin,chain){
@@ -221,6 +233,9 @@ class swTiler extends SmithWatermanBase{
 					resolve(c);
 				}
 				else if (msg.type ==='progress'){
+					this.partialProgress  = msg.data.totalSize;
+					this.partialProgress -= msg.data.remaining;
+					this.partialProgress /= msg.data.totalSize;
 					this.progress();
 				}
 			});
@@ -256,6 +271,8 @@ swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
 		return {score:0,chain:[],highscore:Number.MIN_SAFE_INTEGER};
 	});
 swTiler.TileEdgeDefault = JSON.stringify(swTiler.TileEdgeDefault);
+
+// ---------------------------------------------------------------- //
 
 class swAlgoGpu extends SmithWatermanBase{
 	constructor(name, a, b, opts){
