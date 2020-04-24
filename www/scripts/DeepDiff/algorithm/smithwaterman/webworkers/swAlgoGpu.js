@@ -228,7 +228,7 @@ class swTiler extends SmithWatermanBase{
 			let gpu = new swAlgoGpu(id,a,b,opts);
 			gpu.addEventListener('msg', (msg)=>{
 				msg = msg.detail;
-				if(msg.type === 'stopped'){
+				if(msg.type === 'complete'){
 					let c = gpu.finishedChains;
 					resolve(c);
 				}
