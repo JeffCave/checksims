@@ -121,9 +121,7 @@ class swTiler extends SmithWatermanBase{
 		let cell = this.partial.get(index);
 		if(!cell){
 			// create it if necessary
-			cell = {
-				id:[x,y],
-			};
+			cell = {id:[x,y]};
 			this.partial.set(index,cell);
 		}
 
@@ -164,7 +162,8 @@ class swTiler extends SmithWatermanBase{
 	}
 
 
-	async calcBuffer(){
+	async calcBuffer(force = false){
+		if(force) this.calcBufferInstance = null;
 		this.calcBufferInstance = this.calcBufferInstance || utils.defer(async ()=>{
 
 			// this thing is supposed to be a multi-threaded thing. We may need
@@ -176,10 +175,56 @@ class swTiler extends SmithWatermanBase{
 			let tile = this.matrix.shift();
 			if(tile){
 				tile = await this.calcTile(tile);
+				// We have received a bunch of chains from the tile, some of
+				// them will be complete, and some of them will have gone right
+				// up to the edges. These chains need to be sorted into three
+				// groups:
+				//
+				//  1. finished chains
+				//  2. chains touching the east edge
+				//  3. chains touching the south edge
+				//  4. chain touching the corner
+				let chains = tile.finishedChains.slice();
+				let unfinished = [[],[],[]];
+				for(let chain = chains.pop(); chain; chain = chains.pop()){
+					if(chain[0] === tile.segments.submissions[0].fin && chain[1] === tile.segments.submissions[1].fin){
+						unfinished[2].push(chain);
+					}
+					else if(chain[1] === tile.segments.submissions[1].fin){
+						unfinished[1].push(chain);
+					}
+					else if(chain[0] === tile.segments.submissions[0].fin){
+						unfinished[0].push(chain);
+					}
+					else{
+						this.finishedChains.push(chain);
+					}
+				}
+
+
+				let nw = unfinished[2].pop();
+				if(!nw){
+					nw = JSON.parse(swTiler.TileEdgeDefault).pop();
+				}
+				nw = [nw];
+				let w  = JSON.parse(swTiler.TileEdgeDefault);
+				for(let loc of unfinished[1]){
+					w[loc.y] = loc;
+				}
+				let n  = JSON.parse(swTiler.TileEdgeDefault);
+				for(let loc of unfinished[0]){
+					w[loc.x] = loc;
+				}
+
+				let x = tile.id[0], y = tile.id[1];
+				this.addToTile( x+1 , y+1 , 'nw', nw );
+				this.addToTile( x+1 , y   , 'w' , w  );
+				this.addToTile( x   , y+1 , 'n' , n  );
+
 				this.remaining--;
 				this.progress();
 				// schedule the next processing cycle
-				this.calcBuffer();
+				this.calcBuffer(true);
 			}
 			else{
 				this.stop();
@@ -243,6 +288,12 @@ class swTiler extends SmithWatermanBase{
 		});
 		try{
 			tile.finishedChains = await p;
+			for(let chain of tile.finishedChains){
+				for(let seg of chain.history){
+					let val = seg.lexeme;
+					seg.lexeme = lexememap.dec[val];
+				}
+			}
 		}
 		catch(e){
 			console.error(e);
@@ -263,8 +314,9 @@ class swTiler extends SmithWatermanBase{
 	}
 
 }
-//swTiler.TileSize = (2**(16-1)) - 2;
-swTiler.TileSize = 600;
+swTiler.TileSize = 800; //(2**(16-1)) - 2;
+// turn size in to a power of two value to keep shaders happy
+swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize,0.5)),2);
 swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
 	.fill(0)
 	.map(()=>{
