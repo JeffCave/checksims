@@ -172,13 +172,13 @@ class SmithWatermanBase extends EventTarget{
 			remaining: this.remaining,
 			tokenMatch: this.tokenMatch,
 			submissions: [
-					{
-						length:this.submissions[0].length
-					},
-					{
-						length:this.submissions[1].length
-					}
-				]
+				{
+					length:this.submissions[0].length
+				},
+				{
+					length:this.submissions[1].length
+				}
+			]
 		};
 		return json;
 	}

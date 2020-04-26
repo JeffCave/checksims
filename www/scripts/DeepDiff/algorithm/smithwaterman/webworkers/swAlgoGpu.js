@@ -24,11 +24,14 @@ const utils = {
 };
 
 const modDir = [
-		[0,0], // don't move
-		[0,1],
-		[1,0],
-		[1,1]
-	];
+	[0,0], // don't move
+	[0,1],
+	[1,0],
+	[1,1]
+];
+
+const VERT = 0;
+const HORIZ = 1;
 
 class swTiler extends SmithWatermanBase{
 	constructor(name, a, b, opts){
@@ -62,6 +65,7 @@ class swTiler extends SmithWatermanBase{
 
 		this.pause();
 		this.addToTile(0,0,'nw',JSON.parse(swTiler.TileEdgeDefault).pop());
+		this.calcBuffer();
 		this.start();
 	}
 
@@ -108,20 +112,23 @@ class swTiler extends SmithWatermanBase{
 		return s;
 	}
 
-	async addToTile(x,y,origin,chain){
+	async addToTile(horizontal,vertical,origin,chain){
 		// bounds checking
-		if(x < 0 || y < 0){
+		if(vertical < 0 || horizontal < 0){
 			return false;
 		}
-		if(x >= this.submissions[0].tileLength || y >= this.submissions[1].tileLength){
+		if(vertical >= this.submissions[VERT].tileLength || horizontal >= this.submissions[HORIZ].tileLength){
+			while(chain.length > 0) this.finishedChains.push(chain.pop()) ;
 			return false;
 		}
 		// lookup the data at that location
+		let x = horizontal;
+		let y = vertical;
 		let index = this.CoordToIndex(x,y);
 		let cell = this.partial.get(index);
 		if(!cell){
 			// create it if necessary
-			cell = {id:[x,y]};
+			cell = {id:[vertical,horizontal]};
 			this.partial.set(index,cell);
 		}
 
@@ -131,13 +138,13 @@ class swTiler extends SmithWatermanBase{
 		}
 
 		// initialize values that exist at the begining of the world
-		if(x === 0){
-			cell.w = JSON.parse(swTiler.TileEdgeDefault);
-		}
-		if(y === 0){
+		if(!cell.n && vertical === 0){
 			cell.n = JSON.parse(swTiler.TileEdgeDefault);
 		}
-		if(x === 0 || y === 0){
+		if(!cell.w && horizontal === 0){
+			cell.w = JSON.parse(swTiler.TileEdgeDefault);
+		}
+		if(!cell.nw && (vertical === 0 || horizontal === 0)){
 			cell.nw = JSON.parse(swTiler.TileEdgeDefault).pop();
 		}
 
@@ -151,11 +158,6 @@ class swTiler extends SmithWatermanBase{
 			// processing queue
 			this.partial.delete(index);
 			this.matrix.push(cell);
-		}
-
-		// if the pre-processing queue is empty, do the actual calcuations
-		if(this.partial.size === 0){
-			this.calcBuffer();
 		}
 
 		return cell;
@@ -216,15 +218,16 @@ class swTiler extends SmithWatermanBase{
 					w[loc.x] = loc;
 				}
 
-				let x = tile.id[0], y = tile.id[1];
-				this.addToTile( x+1 , y+1 , 'nw', nw );
+				let x = tile.id[HORIZ], y = tile.id[VERT];
 				this.addToTile( x+1 , y   , 'w' , w  );
+				this.addToTile( x+1 , y+1 , 'nw', nw );
 				this.addToTile( x   , y+1 , 'n' , n  );
 
 				this.remaining--;
 				this.progress();
 				// schedule the next processing cycle
 				this.calcBuffer(true);
+
 			}
 			else{
 				this.stop();
@@ -314,7 +317,7 @@ class swTiler extends SmithWatermanBase{
 	}
 
 }
-swTiler.TileSize = 800; //(2**(16-1)) - 2;
+swTiler.TileSize = 4096; //(2**(16-1)) - 2;
 // turn size in to a power of two value to keep shaders happy
 swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize,0.5)),2);
 swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
