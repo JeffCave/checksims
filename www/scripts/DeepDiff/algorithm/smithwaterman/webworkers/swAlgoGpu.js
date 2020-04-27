@@ -186,20 +186,25 @@ class swTiler extends SmithWatermanBase{
 				//  2. chains touching the east edge
 				//  3. chains touching the south edge
 				//  4. chain touching the corner
+				if(!tile.finishedChains){
+					debugger;
+				}
 				let chains = tile.finishedChains.slice();
 				let unfinished = [[],[],[]];
 				for(let chain = chains.pop(); chain; chain = chains.pop()){
-					if(chain[0] === tile.segments.submissions[0].fin && chain[1] === tile.segments.submissions[1].fin){
+					let vMatch = chain.y === tile.segments[VERT].fin;
+					let hMatch = chain.x === tile.segments[HORIZ].fin;
+					if(vMatch && hMatch){
 						unfinished[2].push(chain);
 					}
-					else if(chain[1] === tile.segments.submissions[1].fin){
-						unfinished[1].push(chain);
+					else if(vMatch){
+						unfinished[VERT].push(chain);
 					}
-					else if(chain[0] === tile.segments.submissions[0].fin){
-						unfinished[0].push(chain);
+					else if(hMatch){
+						unfinished[HORIZ].push(chain);
 					}
 					else{
-						this.finishedChains.push(chain);
+						this.chains.push(chain);
 					}
 				}
 
@@ -277,7 +282,10 @@ class swTiler extends SmithWatermanBase{
 			gpu.addEventListener('msg', (msg)=>{
 				msg = msg.detail;
 				if(msg.type === 'complete'){
-					let c = gpu.finishedChains;
+					let c = msg.data.chains;
+					if(!c){
+						debugger;
+					}
 					resolve(c);
 				}
 				else if (msg.type ==='progress'){
@@ -291,6 +299,9 @@ class swTiler extends SmithWatermanBase{
 		});
 		try{
 			tile.finishedChains = await p;
+			if(!tile.finishedChains){
+				debugger;
+			}
 			for(let chain of tile.finishedChains){
 				for(let seg of chain.history){
 					let val = seg.lexeme;
@@ -317,7 +328,7 @@ class swTiler extends SmithWatermanBase{
 	}
 
 }
-swTiler.TileSize = 4096; //(2**(16-1)) - 2;
+swTiler.TileSize = 1024; //(2**(16-1)) - 2;
 // turn size in to a power of two value to keep shaders happy
 swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize,0.5)),2);
 swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
