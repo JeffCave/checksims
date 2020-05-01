@@ -38,8 +38,8 @@ class swTiler extends SmithWatermanBase{
 		super(name, a, b, opts);
 
 		if(!a && !b && name.name){
-			a = name.submissions[0];
-			b = name.submissions[1];
+			a = name.submissions[VERT];
+			b = name.submissions[HORIZ];
 			name = name.name;
 		}
 
@@ -48,13 +48,15 @@ class swTiler extends SmithWatermanBase{
 		this.name = name;
 		this.submissions = [a,b].map((s)=>{
 			s = { sub: s };
-			s.tileLen = Math.ceil(a.length / this.TileSize);
+			s.tileLen = a.length / this.TileSize;
+			//s.tileLen = s.tileLen - 1;
+			s.tileLen = Math.ceil(s.tileLen);
 			return s;
 		});
 		this.partial = new Map();
 		this.matrix = [];
 		this.chains = [];
-		this.remaining = this.submissions[0].tileLen * this.submissions[1].tileLen;
+		this.remaining = this.submissions[VERT].tileLen * this.submissions[HORIZ].tileLen;
 		this.totalSize = this.remaining;
 		this.partialProgress = 0;
 
@@ -82,9 +84,14 @@ class swTiler extends SmithWatermanBase{
 	stop(){
 		this.pause();
 
+		this.chains = this.chains.concat(Array.from(this.partial.values()));
+		this.chains = this.chains
+			.sort((a,b)=>{return b.score-a.score;})
+			.slice(0,100);
+
 		let msg = {type:'stopped',data:this.status};
 		msg.data.chains = this.chains;
-		msg.data.submissions = this.submissions;
+		msg.data.submissions = this.submissions.map((d)=>{ return d.sub; });
 
 		if(this.remaining === 0){
 			msg.type = 'complete';
@@ -117,8 +124,12 @@ class swTiler extends SmithWatermanBase{
 		if(vertical < 0 || horizontal < 0){
 			return false;
 		}
-		if(vertical >= this.submissions[VERT].tileLength || horizontal >= this.submissions[HORIZ].tileLength){
-			while(chain.length > 0) this.finishedChains.push(chain.pop()) ;
+		let isInBounds =
+			vertical < this.submissions[VERT].tileLen &&
+			horizontal < this.submissions[HORIZ].tileLen
+			;
+		if(!isInBounds){
+			while(chain.length > 0) this.chains.push(chain.pop()) ;
 			return false;
 		}
 		// lookup the data at that location
@@ -253,13 +264,13 @@ class swTiler extends SmithWatermanBase{
 		let segs = [{},{}];
 		for(let s=0; s<segs.length; s++){
 			let seg = segs[s];
-			let sub = this.submissions[0].sub;
+			let sub = this.submissions[s].sub;
 			seg.start = tile.id[s] * this.TileSize;
-			seg.fin = seg.start + this.TileSize;
+			seg.fin = seg.start + this.TileSize - 1;
 			// TODO: Investigate potential one off
 			//seg.fin = Math.min(sub.length,seg.fin) - 1;
 			seg.fin = Math.min(sub.length,seg.fin);
-			seg.segment = sub.slice(seg.start,seg.fin);
+			seg.segment = sub.slice(seg.start,seg.fin+1);
 			for(let i=0; i<seg.segment.length; i++){
 				let val = seg.segment[i];
 				val = val.lexeme;
@@ -275,10 +286,10 @@ class swTiler extends SmithWatermanBase{
 		tile.segments = segs;
 		let p = new Promise((resolve)=>{
 			let id = this.name + JSON.stringify(tile.id);
-			let a = segs[0].segment;
-			let b = segs[1].segment;
+			let v = segs[VERT].segment;
+			let h = segs[HORIZ].segment;
 			let opts = {};
-			let gpu = new swAlgoGpu(id,a,b,opts);
+			let gpu = new swAlgoGpu(id,v,h,opts);
 			gpu.addEventListener('msg', (msg)=>{
 				msg = msg.detail;
 				if(msg.type === 'complete'){
@@ -302,12 +313,6 @@ class swTiler extends SmithWatermanBase{
 			if(!tile.finishedChains){
 				debugger;
 			}
-			for(let chain of tile.finishedChains){
-				for(let seg of chain.history){
-					let val = seg.lexeme;
-					seg.lexeme = lexememap.dec[val];
-				}
-			}
 		}
 		catch(e){
 			console.error(e);
@@ -317,11 +322,11 @@ class swTiler extends SmithWatermanBase{
 	}
 
 	CoordToIndex(x,y){
-		return y * this.submissions[0].tileLen + x;
+		return y * this.submissions[VERT].tileLen + x;
 	}
 
 	IndexToCoord(i){
-		let len =this.submissions[0].tileLen;
+		let len =this.submissions[VERT].tileLen;
 		let x = i/len;
 		let y = i%len;
 		return [x,y];
@@ -341,11 +346,11 @@ swTiler.TileEdgeDefault = JSON.stringify(swTiler.TileEdgeDefault);
 // ---------------------------------------------------------------- //
 
 class swAlgoGpu extends SmithWatermanBase{
-	constructor(name, a, b, opts){
-		super(name,a,b,opts);
-		if(!a && !b && name.name){
-			a = name.submissions[0];
-			b = name.submissions[1];
+	constructor(name, v, h, opts){
+		super(name,v,h,opts);
+		if(!v && !h && name.name){
+			v = name.submissions[VERT];
+			h = name.submissions[HORIZ];
 			name = name.name;
 		}
 		this.matrix = [];
@@ -353,18 +358,20 @@ class swAlgoGpu extends SmithWatermanBase{
 		this.finishedChains = [];
 
 		this.name = name;
-		this.submissions = [a,b];
+		this.submissions = [];
+		this.submissions[VERT] = v;
+		this.submissions[HORIZ] = h;
 
-		this.cycles = a.length + b.length - 1;
+		this.cycles = v.length + h.length - 1;
 		this.remaining =
 			// initialization loop and write to GPU
-			a.length + b.length + 1 +
+			v.length + h.length + 1 +
 			// apply initial score if values equal each other
 			1 +
 			// the number of cycles to calculate the space
 			this.cycles +
 			// number of cycles to process the chains
-			(a.length * b.length) +
+			(v.length * h.length) +
 			0;
 		this.totalSize = this.remaining;
 
@@ -375,20 +382,26 @@ class swAlgoGpu extends SmithWatermanBase{
 
 		this.pause();
 
-		this.gpu = new psGpu({width:a.length,height:b.length});
+		this.gpu = new psGpu({width:h.length,height:v.length});
 		this.gpu.addProgram('smithwaterman', gpuFragSW);
 		this.gpu.addProgram('initializeSpace', gpuFragInit);
 		this.gpu.initMemory();
 
 		let data = this.gpu.emptyData();
 		let data16 = new Uint16Array(data.buffer);
-		for(let x=0,pos=0; x < this.gpu.width; x++,pos+=2){
-			data16[pos] = this.submissions[0][x].lexeme;
+		for(let i=0,pos=0; i < this.gpu.width; i++,pos+=2){
+			if(!this.submissions[HORIZ][i]){
+				debugger;
+			}
+			data16[pos] = this.submissions[HORIZ][i].lexeme;
 			this.remaining--;
 		}
 		this.postMessage({type:'progress', data:this.toJSON()});
-		for(let y=0,pos=1; y < this.gpu.height; y++,pos+=(this.gpu.width*2)){
-			data16[pos] = this.submissions[1][y].lexeme;
+		for(let i=0,pos=1; i < this.gpu.height; i++,pos+=(this.gpu.width*2)){
+			if(!this.submissions[VERT][i]){
+				debugger;
+			}
+			data16[pos] = this.submissions[VERT][i].lexeme;
 			this.remaining--;
 		}
 		this.postMessage({type:'progress', data:this.toJSON()});
@@ -546,16 +559,16 @@ class swAlgoGpu extends SmithWatermanBase{
 				 * If the character was already used by a previous chain, it
 				 * means this chain can't have it, and we have broken our chain
 				 */
-				let a = this.submissions[0][item.x];
-				let b = this.submissions[1][item.y];
-				if(a.shared || b.shared){
+				let h = this.submissions[HORIZ][item.x];
+				let v = this.submissions[VERT][item.y];
+				if(v.shared || h.shared){
 					item.prev = -1;
 					continue;
 				}
 				// this element belongs to this chain, indicate that future
 				// chains should not use it
-				a.shared = resolved.length;
-				b.shared = resolved.length;
+				v.shared = resolved.length;
+				h.shared = resolved.length;
 
 
 				// map the next node in the chain
@@ -599,43 +612,43 @@ class swAlgoGpu extends SmithWatermanBase{
 				delete history[i].history;
 				history[i] = JSON.parse(JSON.stringify(history[i]));
 				let coords = history[i];
-				let a = this.submissions[0][coords.x];
-				let b = this.submissions[1][coords.y];
-				if(!a.shared){
-					a.shared = c;
-					chain.submissions[0].tokens++;
+				let h = this.submissions[HORIZ][coords.x];
+				let v = this.submissions[VERT][coords.y];
+				if(!h.shared){
+					h.shared = c;
+					chain.submissions[HORIZ].tokens++;
 				}
-				if(!b.shared){
-					b.shared = c;
-					chain.submissions[1].tokens++;
+				if(!v.shared){
+					v.shared = c;
+					chain.submissions[VERT].tokens++;
 				}
 
-				let segA = chain.submissions[0].blocks[0];
-				if(!segA || segA.path !== a.range[2]){
-					segA = {
-						path: a.range[2],
+				let segV = chain.submissions[VERT].blocks[0];
+				if(!segV || segV.path !== v.range[2]){
+					segV = {
+						path: v.range[2],
 						start: Number.POSITIVE_INFINITY,
 						end: Number.NEGATIVE_INFINITY,
 					};
-					chain.submissions[0].blocks.unshift(segA);
+					chain.submissions[VERT].blocks.unshift(segV);
 				}
-				segA.start = Math.min(a.range[0], segA.start);
-				segA.end   = Math.max(a.range[1], segA.end);
+				segV.start = Math.min(v.range[0], segV.start);
+				segV.end   = Math.max(v.range[1], segV.end);
 
-				let segB = chain.submissions[1].blocks[0];
-				if(!segB || segB.path !== b.range[2]){
-					segB = {
-						path: b.range[2],
+				let segH = chain.submissions[HORIZ].blocks[0];
+				if(!segH || segH.path !== h.range[2]){
+					segH = {
+						path: h.range[2],
 						start: Number.POSITIVE_INFINITY,
 						end: Number.NEGATIVE_INFINITY,
 					};
-					chain.submissions[1].blocks.unshift(segB);
+					chain.submissions[HORIZ].blocks.unshift(segH);
 				}
-				segB.start = Math.min(b.range[0], segB.start);
-				segB.end   = Math.max(b.range[1], segB.end);
+				segH.start = Math.min(h.range[0], segH.start);
+				segH.end   = Math.max(h.range[1], segH.end);
 			}
-			chain.submissions[0].blocks.reverse();
-			chain.submissions[1].blocks.reverse();
+			chain.submissions[VERT].blocks.reverse();
+			chain.submissions[HORIZ].blocks.reverse();
 			chain.history = history;
 		}
 		this.postMessage({type:'progress', data:this.toJSON()});
@@ -669,12 +682,12 @@ class swAlgoGpu extends SmithWatermanBase{
 		let table = [];
 		let row = ['&nbsp;'];
 		for(let c=0; c<this.gpu.width; c++){
-			row.push(this.submissions[0][c].lexeme + '<sub>['+c+']</sub>');
+			row.push(this.submissions[VERT][c].lexeme + '<sub>['+c+']</sub>');
 		}
 		table.push(row.map((d,i)=>{return '<th>'+d+'</th>';}).join(''));
 
 		for(let r=0; r<this.gpu.height && v<values.length; r++){
-			let row = [this.submissions[1][r].lexeme+'<sub>['+r+']</sub>'];
+			let row = [this.submissions[HORIZ][r].lexeme+'<sub>['+r+']</sub>'];
 			for(let c=0; c<this.gpu.width && v<values.length; c++){
 				let cell = [
 					[values[v+0]-127,values[v+1]].join('&nbsp;'),
@@ -881,8 +894,8 @@ onmessage = function(params){
 		console.log("Initializing web worker");
 
 		let id = params.data.name;
-		let a = params.data.submissions[0];
-		let b = params.data.submissions[1];
+		let a = params.data.submissions[VERT];
+		let b = params.data.submissions[HORIZ];
 		let opts = params.data.options;
 
 		matrix = new swTiler(id,a,b,opts);
