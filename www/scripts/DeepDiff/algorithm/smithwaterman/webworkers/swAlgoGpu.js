@@ -55,7 +55,7 @@ class swTiler extends SmithWatermanBase{
 		});
 		this.partial = new Map();
 		this.matrix = [];
-		this.chains = [];
+		this.chains = new Map();
 		this.remaining = this.submissions[VERT].tileLen * this.submissions[HORIZ].tileLen;
 		this.totalSize = this.remaining;
 		this.partialProgress = 0;
@@ -84,13 +84,12 @@ class swTiler extends SmithWatermanBase{
 	stop(){
 		this.pause();
 
-		this.chains = this.chains.concat(Array.from(this.partial.values()));
-		this.chains = this.chains
-			.sort((a,b)=>{return b.score-a.score;})
-			.slice(0,100);
+		let chains = Array.from(this.chains.values());
+		chains = chains.sort((a,b)=>{return b.score-a.score;});
+		chains = chains.slice(0,100);
 
 		let msg = {type:'stopped',data:this.status};
-		msg.data.chains = this.chains;
+		msg.data.chains = chains;
 		msg.data.submissions = this.submissions.map((d)=>{ return d.sub; });
 
 		if(this.remaining === 0){
@@ -129,7 +128,12 @@ class swTiler extends SmithWatermanBase{
 			horizontal < this.submissions[HORIZ].tileLen
 			;
 		if(!isInBounds){
-			while(chain.length > 0) this.chains.push(chain.pop()) ;
+			while(chain.length > 0) {
+				let val = chain.pop();
+				if(val.i){
+					this.chains.set(val.i,val);
+				}
+			}
 			return false;
 		}
 		// lookup the data at that location
@@ -215,7 +219,7 @@ class swTiler extends SmithWatermanBase{
 						unfinished[HORIZ].push(chain);
 					}
 					else{
-						this.chains.push(chain);
+						this.chains.set(chain.i,chain);
 					}
 				}
 
