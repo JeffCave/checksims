@@ -1,11 +1,4 @@
-'use strict';
-
 import * as utils from '../DeepDiff/util/misc.js';
-
-/*
-global _
-global HTMLElement
-*/
 
 export default class psForceDirected extends HTMLElement {
 	constructor(){

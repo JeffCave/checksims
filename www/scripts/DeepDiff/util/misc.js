@@ -1,4 +1,3 @@
-'use strict';
 export{
 	checkNotNull,
 	checkArgument,
@@ -12,7 +11,7 @@ global File
 global jsSHA
 */
 
-export default function checkNotNull(value = null){
+function checkNotNull(value = null){
 	if(value === null || typeof value === 'undefined'){
 		console.trace("Null Exception (checkNotNull)");
 		throw new Error("Null Exception (checkNotNull)");
@@ -27,7 +26,7 @@ function checkArgument(value = null, msg = ""){
 }
 
 function assert(check, msg = "no message"){
-	check = !(check === false);
+	check = check !== false;
 	if(!check){
 		throw new Error('Assertion failure: ' + msg);
 	}
@@ -95,10 +94,10 @@ export function defer(func){
  * https://stackoverflow.com/questions/521295/seeding-the-random-number-generator-in-javascript
  */
 export function UniformDistribution(seed) {
-	function lcg(a) {return a * 48271 % 2147483647}
+	function lcg(a) {return a * 48271 % 2147483647;}
 	seed = Math.abs(seed);
 	seed = seed ? lcg(seed) : lcg(Math.random());
-	return function() {return (seed = lcg(seed)) / 2147483648};
+	return function() {return (seed = lcg(seed)) / 2147483648;};
 }
 
 /**

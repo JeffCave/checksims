@@ -32,6 +32,7 @@ const modDir = [
 
 const VERT = 0;
 const HORIZ = 1;
+const DIAG = 2;
 
 class swTiler extends SmithWatermanBase{
 	constructor(name, a, b, opts){
@@ -130,7 +131,7 @@ class swTiler extends SmithWatermanBase{
 		if(!isInBounds){
 			while(chain.length > 0) {
 				let val = chain.pop();
-				if(val.i){
+				if(val.highscore > Number.MIN_SAFE_INTEGER){
 					this.chains.set(val.i,val);
 				}
 			}
@@ -201,16 +202,27 @@ class swTiler extends SmithWatermanBase{
 				//  2. chains touching the east edge
 				//  3. chains touching the south edge
 				//  4. chain touching the corner
-				if(!tile.finishedChains){
-					debugger;
-				}
 				let chains = tile.finishedChains.slice();
 				let unfinished = [[],[],[]];
 				for(let chain = chains.pop(); chain; chain = chains.pop()){
-					let vMatch = chain.y === tile.segments[VERT].fin;
-					let hMatch = chain.x === tile.segments[HORIZ].fin;
+					let vMatch = null;
+					let hMatch = null;
+
+					let last = chain.history[chain.history.length-1];
+					vMatch = last.y === tile.segments[VERT].start;
+					hMatch = last.x === tile.segments[HORIZ].start;
+					if(vMatch || hMatch){
+						let link = this.chains.get(chain.i);
+						if(link){
+							this.chains.delete(link);
+							chain.history = chain.history.concat(link);
+						}
+					}
+
+					vMatch = chain.y === tile.segments[VERT].fin;
+					hMatch = chain.x === tile.segments[HORIZ].fin;
 					if(vMatch && hMatch){
-						unfinished[2].push(chain);
+						unfinished[DIAG].push(chain);
 					}
 					else if(vMatch){
 						unfinished[VERT].push(chain);
@@ -224,18 +236,18 @@ class swTiler extends SmithWatermanBase{
 				}
 
 
-				let nw = unfinished[2].pop();
+				let nw = unfinished[DIAG].pop();
 				if(!nw){
 					nw = JSON.parse(swTiler.TileEdgeDefault).pop();
 				}
 				nw = [nw];
 				let w  = JSON.parse(swTiler.TileEdgeDefault);
-				for(let loc of unfinished[1]){
+				for(let loc of unfinished[HORIZ]){
 					w[loc.y] = loc;
 				}
 				let n  = JSON.parse(swTiler.TileEdgeDefault);
-				for(let loc of unfinished[0]){
-					w[loc.x] = loc;
+				for(let loc of unfinished[VERT]){
+					n[loc.x] = loc;
 				}
 
 				let x = tile.id[HORIZ], y = tile.id[VERT];
@@ -275,8 +287,10 @@ class swTiler extends SmithWatermanBase{
 			//seg.fin = Math.min(sub.length,seg.fin) - 1;
 			seg.fin = Math.min(sub.length,seg.fin);
 			seg.segment = sub.slice(seg.start,seg.fin+1);
-			for(let i=0; i<seg.segment.length; i++){
+			for(let i=seg.segment.length-1; i>=0; i--){
 				let val = seg.segment[i];
+				val = JSON.parse(JSON.stringify(val));
+				seg.segment[i] = val;
 				val = val.lexeme;
 				if(!(val in lexememap.enc)){
 					lexememap.enc[val] = lexememap.dec.length;
@@ -298,9 +312,6 @@ class swTiler extends SmithWatermanBase{
 				msg = msg.detail;
 				if(msg.type === 'complete'){
 					let c = msg.data.chains;
-					if(!c){
-						debugger;
-					}
 					resolve(c);
 				}
 				else if (msg.type ==='progress'){
@@ -314,8 +325,18 @@ class swTiler extends SmithWatermanBase{
 		});
 		try{
 			tile.finishedChains = await p;
-			if(!tile.finishedChains){
-				debugger;
+			let width = this.submissions[HORIZ].sub.length;
+			let horiz = tile.id[HORIZ] * this.TileSize;
+			let vert  = tile.id[VERT ] * this.TileSize;
+			for(let chain of tile.finishedChains){
+				chain.x = horiz + chain.x;
+				chain.y = vert  + chain.y;
+				chain.i = (chain.y * width) + chain.x;
+				for(chain of chain.history){
+					chain.x = horiz + chain.x;
+					chain.y = vert  + chain.y;
+					chain.i = (chain.y * width) + chain.x;
+				}
 			}
 		}
 		catch(e){
@@ -394,17 +415,11 @@ class swAlgoGpu extends SmithWatermanBase{
 		let data = this.gpu.emptyData();
 		let data16 = new Uint16Array(data.buffer);
 		for(let i=0,pos=0; i < this.gpu.width; i++,pos+=2){
-			if(!this.submissions[HORIZ][i]){
-				debugger;
-			}
 			data16[pos] = this.submissions[HORIZ][i].lexeme;
 			this.remaining--;
 		}
 		this.postMessage({type:'progress', data:this.toJSON()});
 		for(let i=0,pos=1; i < this.gpu.height; i++,pos+=(this.gpu.width*2)){
-			if(!this.submissions[VERT][i]){
-				debugger;
-			}
 			data16[pos] = this.submissions[VERT][i].lexeme;
 			this.remaining--;
 		}
@@ -525,22 +540,38 @@ class swAlgoGpu extends SmithWatermanBase{
 
 		/*
 		* Now for the fun part
+		*
+		* resolved - the list of chains that actually exist
 		*/
 		let resolved = [];
 		let chain = {score:Number.MAX_VALUE};
-		this.resetShareMarkers();
+		// This bugs me. There has got to be a way to pre-index this
+		// by score to allow us to rapidly find the best candidate.
+		//
+		// Its wrong too.
+		//
+		// We don't want to start with the highest score, we want
+		// to start with the last item in a chain, and make sure
+		// it is the one that moves down the ... I just don't know
+		// ... but its wrong
+		let chainstarts = Array.from(index.values())
+			.sort((a,b)=>{
+				let ord = a.score - b.score;
+				if(ord === 0){
+					ord = b.i - a.i;
+				}
+				return ord;
+			});
 
-		while(index.size > 0 && resolved.length < this.MaxChains && chain.score >= this.ScoreSignificant){
-			chain = Array.from(index.values())
-				.sort((a,b)=>{
-					let ord = b.score - a.score;
-					if(ord === 0){
-						ord = a.i - b.i;
-					}
-					return ord;
-				})
-				.shift()
-				;
+		while(index.size > 0 && chain.score >= this.ScoreSignificant){
+			chain = chainstarts.pop();
+			if(! index.has(chain.i)){
+				// This would indicate that the item we retrieved from the sorted
+				// array was removed from the master index. That means it was
+				// part of a prior chain. In this case, we should just ignore
+				// it.... it is not the start of a chain.
+				continue;
+			}
 			if(!chain.score){
 				index.delete(chain.i);
 				console.warn('This should never happen');
@@ -559,104 +590,40 @@ class swAlgoGpu extends SmithWatermanBase{
 				item.x = Math.floor(item.i/4)%this.gpu.width;
 				item.y = Math.floor(Math.floor(item.i/4)/this.gpu.width);
 
-				/*
-				 * If the character was already used by a previous chain, it
-				 * means this chain can't have it, and we have broken our chain
-				 */
-				let h = this.submissions[HORIZ][item.x];
-				let v = this.submissions[VERT][item.y];
-				if(v.shared || h.shared){
-					item.prev = -1;
-					continue;
-				}
-				// this element belongs to this chain, indicate that future
-				// chains should not use it
-				v.shared = resolved.length;
-				h.shared = resolved.length;
-
-
-				// map the next node in the chain
-				let md = modDir[item.dir%modDir.length];
+				// map the next node in the chain. This is done by
+				// 1. finding the directional component
+				//    - the directional component has two parts embedded in it
+				//      a. terminus
+				//      b. directionality (bottom 2 bits)
+				let md = item.dir%modDir.length;
+				md = modDir[md];
+				// 2. take the current position
 				item.prev = item.i;
+				// 3. find the directional offset along the X
 				item.prev -= md[0] * 1 * 4;
+				// 4. find the directional offset along the Y
 				item.prev -= md[1] * this.gpu.width * 4;
 			}
 
-			let PushChain = (chain)=>{
-				let finItem = chain.history[chain.history.length-1];
-				chain.score -= Math.max(0,finItem.score-this.ScoreMatch);
-				if(chain.score >= this.ScoreSignificant){
-					resolved.push(chain);
-				}
-			};
-
-			PushChain(chain);
+			let finItem = chain.history[chain.history.length-1];
+			chain.score -= Math.max(0,finItem.score-this.ScoreMatch);
+			if(chain.score >= this.ScoreSignificant){
+				resolved.push(chain);
+			}
 		}
 		this.postMessage({type:'progress', data:this.toJSON()});
 		index.clear();
-		resolved = resolved
-			.sort((a,b)=>{
-				let ord = b.score - a.score;
-				if(ord === 0){
-					ord = a.i - b.i;
-				}
-				return ord;
-			})
-			.slice(0,Math.min(this.MaxChains,resolved.length))
-			;
-		// we removed a bunch of chains, but may have marked lexemes as shared.
-		// they aren't anymore, so re-run the entire "shared" markers
-		this.resetShareMarkers();
-		for(let c=1; c<=resolved.length; c++){
-			let chain = resolved[c-1];
-			chain.id = c;
-			chain.submissions = [{tokens:0,blocks:[]},{tokens:0,blocks:[]}];
-			let history = chain.history;
-			for(let i=0; i<history.length; i++){
-				delete history[i].history;
-				history[i] = JSON.parse(JSON.stringify(history[i]));
-				let coords = history[i];
-				let h = this.submissions[HORIZ][coords.x];
-				let v = this.submissions[VERT][coords.y];
-				if(!h.shared){
-					h.shared = c;
-					chain.submissions[HORIZ].tokens++;
-				}
-				if(!v.shared){
-					v.shared = c;
-					chain.submissions[VERT].tokens++;
-				}
-
-				let segV = chain.submissions[VERT].blocks[0];
-				if(!segV || segV.path !== v.range[2]){
-					segV = {
-						path: v.range[2],
-						start: Number.POSITIVE_INFINITY,
-						end: Number.NEGATIVE_INFINITY,
-					};
-					chain.submissions[VERT].blocks.unshift(segV);
-				}
-				segV.start = Math.min(v.range[0], segV.start);
-				segV.end   = Math.max(v.range[1], segV.end);
-
-				let segH = chain.submissions[HORIZ].blocks[0];
-				if(!segH || segH.path !== h.range[2]){
-					segH = {
-						path: h.range[2],
-						start: Number.POSITIVE_INFINITY,
-						end: Number.NEGATIVE_INFINITY,
-					};
-					chain.submissions[HORIZ].blocks.unshift(segH);
-				}
-				segH.start = Math.min(h.range[0], segH.start);
-				segH.end   = Math.max(h.range[1], segH.end);
-			}
-			chain.submissions[VERT].blocks.reverse();
-			chain.submissions[HORIZ].blocks.reverse();
-			chain.history = history;
-		}
+		// A second sorting is not required, because we always start from the most valueab
+		//resolved = resolved
+		//	.sort((a,b)=>{
+		//		let ord = b.score - a.score;
+		//		if(ord === 0){
+		//			ord = a.i - b.i;
+		//		}
+		//		return ord;
+		//	})
+		//	;
 		this.postMessage({type:'progress', data:this.toJSON()});
-
 		this.remaining = 0;
 		this._chains = resolved;
 		return resolved;

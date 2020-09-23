@@ -787,6 +787,7 @@ class DeepDiff extends EventTarget{
 		let algo = this.Algorithm.proc;
 		console.log("Performing comparison on " + pair.name );
 		let timer = performance.now();
+		let lastlogcomplete = Number.MIN_SAFE_INTEGER;
 		let result = await algo(pair,async (comparer)=>{
 			comparer = comparer.data;
 			let result = this.report.results[comparer.name];
@@ -807,8 +808,11 @@ class DeepDiff extends EventTarget{
 				orig.percentMatched = completePct;
 			});
 			//this.addResults(pair);
-			completePct = (completePct * 1000).toFixed(1);
-			console.info(`Progress: ${completePct}‰ (${result.name})`);
+			completePct = Math.floor(completePct * 1000);
+			if(lastlogcomplete !== completePct){
+				console.info(`Progress: ${completePct}‰ (${result.name})`);
+				lastlogcomplete = completePct;
+			}
 		});
 		timer = performance.now() - timer;
 		if(result){

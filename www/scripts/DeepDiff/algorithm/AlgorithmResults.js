@@ -7,18 +7,15 @@ export {
 import {TokenList} from '../token/TokenList.js';
 import {checkNotNull,hasher} from '../util/misc.js';
 
-/**
- * Results for a pairwise comparison algorithm.
- */
 
-	/**
-	 * Construct results for a pairwise similarity detection algorithm.
-	 *
-	 * @param a First submission compared
-	 * @param b Second submission compared
-	 * @param finalListA Token list from submission A, with matched tokens set invalid
-	 * @param finalListB Token list from submission B, with matched tokens set invalid
-	 */
+/**
+ * Construct results for a pairwise similarity detection algorithm.
+ *
+ * @param a First submission compared
+ * @param b Second submission compared
+ * @param finalListA Token list from submission A, with matched tokens set invalid
+ * @param finalListB Token list from submission B, with matched tokens set invalid
+ */
 export default async function Create(a, b, finalListA = null, finalListB = null, chains = [], notes = null) {
 	if(a.type === 'result'){
 		return a;
@@ -79,9 +76,15 @@ export default async function Create(a, b, finalListA = null, finalListB = null,
 		d.finalList = await TokenList.cloneTokenList(d.finalList);
 		d.totalTokens = await d.totalTokens;
 
-		d.identicalTokens = chains.reduce((a,c)=>{
-			return a + c.submissions[r].tokens
-		},0);
+		d.identicalTokens = 0;
+		for(let c in chains){
+			let chain = chains[c];
+			if(!chain.submissions){
+				console.error(`chains[${c}].submissions does not exist`);
+				debugger;
+			}
+			d.identicalTokens += chain.submissions[r].tokens;
+		}
 
 
 		let pct = (d.totalTokens === 0) ? 0 : d.identicalTokens / d.totalTokens;
