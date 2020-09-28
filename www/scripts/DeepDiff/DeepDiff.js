@@ -799,7 +799,7 @@ class DeepDiff extends EventTarget{
 			let completePct = (comparer.totalSize - comparer.remaining) -1;
 			completePct = completePct / comparer.totalSize;
 			completePct = Math.max(0,completePct);
-			result.percentMatched = completePct;
+			result.percentMatched = Math.max(0.01,completePct);
 			result.submissions.forEach((orig,i)=>{
 				//let sub = comparer.submissions[i];
 				//sub = Array.from(sub);
