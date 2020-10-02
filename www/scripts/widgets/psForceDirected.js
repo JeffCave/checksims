@@ -188,7 +188,15 @@ export default class psForceDirected extends HTMLElement {
 				link.points[0].pos,
 				link.points[1].pos,
 				0.1 + 0.9*link.value,
-				100*(1-link.value)+this._.opts.radius*3
+				// This is the natural distance we want between the two 
+				// objects. (the length of the spring)
+				// 
+				// We determine this to be 100 pixels * the level of similarity + but the radius of the objects
+				//
+				// this should space them out more as they are less similar, to 
+				// a maximum of 100 pixels, and a minimum of the radius (collision 
+				// resistance)
+				100*(1-link.value)+this._.opts.radius*10
 			);
 			//let gravity = SpringForce(
 			//	link.points[0].pos,

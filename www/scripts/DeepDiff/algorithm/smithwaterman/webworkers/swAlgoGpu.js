@@ -417,25 +417,25 @@ class swTiler extends SmithWatermanBase{
 
 		// Copy values out of the chains into a master pool
 		let index = new Map();
-		for(let chain of this.chains.values()){
+		for(let chain of this.chains){
+			chain = chain.pop();
 			if(chain.score < this.ScoreSignificant){
 				continue;
 			}
+			let last = null;
 			for(let value of chain.history){
+				delete value.prev;
 				index.set(value.i, value);
+				if(last && last.i > value.i){
+					last.prev = value;
+				}
+				last = value;
 			}
 		}
 
 		this.remaining = index.size;
 		//this.postMessage({type:'progress', data:this.toJSON()});
 
-		/*
-		* Now for the fun part
-		*
-		* resolved - the list of chains that actually exist
-		*/
-		let resolved = [];
-		let chain = {score:Number.MAX_VALUE};
 		// This bugs me. There has got to be a way to pre-index this
 		// by score to allow us to rapidly find the best candidate.
 		//
@@ -454,47 +454,70 @@ class swTiler extends SmithWatermanBase{
 		}
 		let chainstarts = Array.from(index.values()).sort(chaincompare);
 
-		while(chainstarts.length > 0 && chain.score >= this.ScoreSignificant){
+		/*
+		* Now for the fun part
+		*
+		* resolved - the list of chains that actually exist
+		*/
+		let resolved = [];
+		let chain = {score:Number.MAX_VALUE};
+		const ScoreSignificant = this.ScoreSignificant;
+		while(chainstarts.length > 0 && chain.score >= ScoreSignificant){
 			chain = chainstarts.pop();
 			if(! index.has(chain.i)){
 				// This would indicate that the item we retrieved from the sorted
 				// array was removed from the master index. That means it was
 				// part of a prior chain. In this case, we should start a new chain
 				// from the point of intersection. To find the point of
-				// instersection, we search the chains history for the first tiem
+				// instersection, we search the chain's history for the first item
 				// that is still in the pool.
-				chain = this.chains.get(chain.i)
-				for(let link of chain.history){
-					if(index.has(link.i)){
-						if(link.score >= this.ScoreSignificant){
-							chainstarts.push(link);
-							chainstarts = chainstarts.sort(chaincompare);
-						}
-						break;
+				for(let link = chain.prev; link; link = link.prev){
+					if(! index.has(link.i)) continue;
+					if(link.score >= this.ScoreSignificant){
+						chainstarts.push(link);
+						// naturally, the item we have just injected has a score 
+						// that will fix its position, so we need to re-sort the array
+						//
+						// if this happens a lot, we should search the array for the 
+						// insertion point ourselves, and then use `splice`. I'm not 
+						// convinced this happens frequently enough to warrant the change.
+						chainstarts = chainstarts.sort(chaincompare);
 					}
+					break;
 				}
 				continue;
 			}
-			if(!chain.score){
-				index.delete(chain.i);
-				console.warn('This should never happen');
-				continue;
-			}
-			this.remaining = index.size;
-			this.postMessage({type:'progress', data:this.toJSON()});
+			//this.remaining = index.size;
+			//this.postMessage({type:'progress', data:this.toJSON()});
 
-			// construct teh chain's history
-			chain.history = [];
-			for(let item = chain; item; item = index.get(item.prev)){
-				chain.history.push(item);
+			// construct the chain's history
+			let item = null;
+			chain = Object.assign(chain,{submissions:[{},{}]});
+			for(item = chain; item; item=item.prev||{i:null},item=index.get(item.i)){
+				delete item.history;
+				item.pos = [item.x,item.y];
+				chain.submissions[0][item.x] = item.y;
+				chain.submissions[1][item.y] = item.x;
 				index.delete(item.i);
 			}
+			chain.submissions[0].tokens = Object.values(chain.submissions[0]).length;
+			chain.submissions[1].tokens = Object.values(chain.submissions[1]).length;
+			chain = {
+				submissions: chain.submissions,
+				score: chain.score,
+				i: chain.i,
+			};
+			item = null;
 
-			let finItem = chain.history[chain.history.length-1];
-			chain.score -= Math.max(0,finItem.score-this.ScoreMatch);
-			if(chain.score >= this.ScoreSignificant){
-				resolved.push(chain);
-			}
+			/* 
+			 * We already know that this is going to have a signficant score. 
+			 * We checked that when determining if it should be considered teh 
+			 * start of a chain. 
+			 */
+			//if(chain.score >= this.ScoreSignificant){
+			//	resolved.push(chain);
+			//}
+			resolved.push(chain);
 		}
 		this.postMessage({type:'progress', data:this.toJSON()});
 		index.clear();
