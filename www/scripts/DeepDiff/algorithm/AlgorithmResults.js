@@ -83,7 +83,8 @@ export default async function Create(a, b, finalListA = null, finalListB = null,
 				console.error(`chains[${c}].submissions does not exist`);
 				debugger;
 			}
-			d.identicalTokens += chain.submissions[r].tokens;
+			chain = chain.submissions[r];
+			d.identicalTokens += chain.tokens;
 		}
 
 

@@ -84,31 +84,38 @@ export default class psSimilarityMap extends HTMLElement {
 		if(this.flip){
 			submissions.reverse();
 		}
-		for(let i=0; i<2; i++){
-			let chains = JSON.clone(this.result.chains.slice(0,this.PalletteSize-1))
-				.map((d)=>{
-					let chain = d.submissions;
-					if (this.flip) d.submissions.reverse();
-					chain = chain[i].blocks.map((s)=>{
-						s.chain = d.id;
-						return s;
-					});
-					return chain;
+		for(let side of Array(2).keys()){
+			let chains = this.result.chains.slice(0,this.PalletteSize-1)
+				.sort((a,b)=>{
+					let sort = a.score-b.score;
+					if(sort === 0){
+						sort = a.id - b.id;
+					}
+					return sort;
+				})
+				.map((chain,c)=>{
+					let s = side;
+					if(this.flip){
+						s = 1 - s;
+					}
+					chain = chain.submissions[s];
+					let sub = submissions[s];
+					let rtn = {
+						start: sub.tokens[chain.first].range[0],
+						end: sub.tokens[chain.last].range[1],
+						path: sub.tokens[chain.first].range[2],
+						i:c+1
+					};
+					return rtn;
 				})
 				.reduce((a,d)=>{
-					for(let i of d){
-						a[i.path] = a[i.path] || [];
-						a[i.path].push(i);
-					}
+					a[d.path] = a[d.path] || [];
+					a[d.path].push(d);
 					return a;
 				},{})
 				;
-			for(let seg of Object.values(chains)){
-				seg.sort((a,b)=>{return a.start-b.start;});
-			};
-
-			let submission = submissions[i];
-			let element = elems[i];
+			let submission = submissions[side];
+			let element = elems[side];
 			for(let section in submission.content){
 				let content = submission.content[section];
 				let header = document.createElement('details');
@@ -136,7 +143,7 @@ export default class psSimilarityMap extends HTMLElement {
 					body.prepend(span);
 					span = document.createElement('span');
 					span.textContent = submission.fetchSegment(seg);
-					span.dataset.chain = seg.chain;
+					span.dataset.chain = seg.i;
 					body.prepend(span);
 					range = seg;
 				}

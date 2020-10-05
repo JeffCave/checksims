@@ -487,8 +487,8 @@ class swTiler extends SmithWatermanBase{
 				}
 				continue;
 			}
-			//this.remaining = index.size;
-			//this.postMessage({type:'progress', data:this.toJSON()});
+			this.remaining = index.size;
+			this.postMessage({type:'progress', data:this.toJSON()});
 
 			// construct the chain's history
 			let item = null;
@@ -500,12 +500,25 @@ class swTiler extends SmithWatermanBase{
 				chain.submissions[1][item.y] = item.x;
 				index.delete(item.i);
 			}
-			chain.submissions[0].tokens = Object.values(chain.submissions[0]).length;
-			chain.submissions[1].tokens = Object.values(chain.submissions[1]).length;
+			/*
+			 * The chain needs a couple of values calculated for convenience:
+			 * - The mapping, which is a list of the position and its corresponding location on the other submission
+			 * - Tokens: a count of the number of intersection locations (should be teh same as last-first?)
+			 * - first/last: the start and end position on the string
+			 */
+			chain.submissions = chain.submissions.map(d=>{
+				let sub = {
+					mapping: d,
+					tokens: Object.values(d).length,
+					first: Math.min(... Object.keys(d)),
+					last: Math.max(... Object.keys(d)),
+				};
+				return sub;
+			});
 			chain = {
 				submissions: chain.submissions,
 				score: chain.score,
-				i: chain.i,
+				id: chain.i,
 			};
 			item = null;
 
