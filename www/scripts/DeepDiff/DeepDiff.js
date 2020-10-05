@@ -807,7 +807,7 @@ class DeepDiff extends EventTarget{
 				//orig.percentMatched = orig.identicalTokens / orig.totalTokens;
 				orig.percentMatched = completePct;
 			});
-			//this.addResults(pair);
+			this.addResults(pair);
 			completePct = Math.floor(completePct * 1000);
 			if(lastlogcomplete !== completePct){
 				console.info(`Progress: ${completePct}‰ (${result.name})`);

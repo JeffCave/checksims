@@ -95,18 +95,29 @@ export default class psForceDirected extends HTMLElement {
 	}
 
 
-	monitorResults(newval,oldval){
+	async monitorResults(newval,oldval){
+		await this.ReSync();
 		this.start();
-		this.ReSync();
 	}
 
 
 	RenderFrame(){
 		Object.values(this.links).forEach((link)=>{
+			let width = this._.opts.radius*link.value;
+			let opacity = link.value;
+			let color = this._.opts.lineColour;
+			//let animation = '';
+			if(link.complete < 1){
+				width = Math.ceil(width);
+				opacity = 1;
+				color = "orange";
+				//animation = 'heartbeat 1.5s infinite';
+			}
 			let el = link.element;
-			el.setAttribute('stroke',link.complete===1?this._.opts.lineColour:"orange");
-			el.setAttribute('stroke-width',Math.floor((this._.opts.radius+1)*link.value));
-			el.setAttribute('opacity',link.value);
+			//el.style.animation = animation;
+			el.setAttribute('stroke',color);
+			el.setAttribute('stroke-width',Math.floor(width));
+			el.setAttribute('opacity',opacity);
 			el.setAttribute('x1',link.points[0].pos.x);
 			el.setAttribute('y1',link.points[0].pos.y);
 			el.setAttribute('x2',link.points[1].pos.x);
