@@ -274,7 +274,7 @@ class psGpu{
 		gl.uniform2f(resolutionLocation, gl.drawingBufferWidth, gl.drawingBufferHeight);
 		/* MATCH = 2; SKIP = -1; MISMATCH = -1; TERMINUS=5 */
 		let scores = program.uniforms.scores;
-		let sValues = [2,-1,-1,5].map((d)=>{
+		let sValues = [2,-1,-1,20].map((d)=>{
 			return (d+127)/255.0;
 		});
 		gl.uniform4fv(scores, sValues);
@@ -368,8 +368,6 @@ class psGpu{
 
 	get HtmlElement(){
 		console.warn("The code is currently executing `psGpu.HtmlElement` which is known to be extremely slow");
-
-		const colours = ['red','green','blue','black'];
 
 		let values = this.read();
 

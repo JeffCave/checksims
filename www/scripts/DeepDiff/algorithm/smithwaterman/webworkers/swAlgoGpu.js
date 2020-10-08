@@ -104,8 +104,10 @@ class swTiler extends SmithWatermanBase{
 	destroy(){
 	}
 
-	progress(){
-		this.postMessage({type:'progress', data:this.toJSON()});
+	progress(extra={}){
+		let data = this.toJSON();
+		data = Object.assign(data,extra);
+		this.postMessage({type:'progress', data:data});
 	}
 
 	get status(){
@@ -384,7 +386,11 @@ class swTiler extends SmithWatermanBase{
 					this.partialProgress  = msg.data.totalSize;
 					this.partialProgress -= msg.data.remaining;
 					this.partialProgress /= msg.data.totalSize;
-					this.progress();
+					let html = {};
+					if(msg.data.html){
+						html = {html:msg.data.html};
+					}
+					this.progress(html);
 				}
 			});
 			gpu.start();
@@ -611,13 +617,13 @@ class swAlgoGpu extends SmithWatermanBase{
 		let data16 = new Uint16Array(data.buffer);
 		for(let i=0,pos=0; i < this.gpu.width; i++,pos+=2){
 			data16[pos] = this.submissions[HORIZ][i].lexeme;
-			this.remaining--;
 		}
+		this.remaining-=this.gpu.width;
 		this.postMessage({type:'progress', data:this.toJSON()});
 		for(let i=0,pos=1; i < this.gpu.height; i++,pos+=(this.gpu.width*2)){
 			data16[pos] = this.submissions[VERT][i].lexeme;
-			this.remaining--;
 		}
+		this.remaining-=this.gpu.height;
 		this.postMessage({type:'progress', data:this.toJSON()});
 		// Write the values to the image
 		this.gpu.write(data);
@@ -678,7 +684,11 @@ class swAlgoGpu extends SmithWatermanBase{
 		this.postMessage({type:'pause'});
 	}
 
-
+	//toJSON(){
+	//	let json = super.toJSON();
+	//	json.html = this.html;
+	//	return json;
+	//}
 
 	calc(){
 		let timeLimit = Date.now() + 100;
@@ -831,41 +841,42 @@ class swAlgoGpu extends SmithWatermanBase{
 			return this._html || '';
 		}
 
-		function format(val){
-			val = "\u00a0\u00a0\u00a0" + val;
-			val = val.split('').reverse().slice(0,3).reverse().join('');
-			return val;
-		}
+		const dir = ['?','&#129121;','&#129120;','&#129124;'];
 
-		let val = this.gpu.read();
-		let values = Array.from(val).map(d=>{
-			return format(d);
-		});
+		let values = this.gpu.read();
 		let v = 0;
 
 		let table = [];
 		let row = ['&nbsp;'];
-		for(let c=0; c<this.gpu.width; c++){
-			row.push(this.submissions[VERT][c].lexeme + '<sub>['+c+']</sub>');
+		for(let c=0; c<this.submissions[HORIZ].length; c++){
+			row.push(this.submissions[HORIZ][c].lexeme + '<sub>['+c+']</sub>');
 		}
 		table.push(row.map((d,i)=>{return '<th>'+d+'</th>';}).join(''));
 
-		for(let r=0; r<this.gpu.height && v<values.length; r++){
-			let row = [this.submissions[HORIZ][r].lexeme+'<sub>['+r+']</sub>'];
-			for(let c=0; c<this.gpu.width && v<values.length; c++){
-				let cell = [
-					[values[v+0]-127,values[v+1]].join('&nbsp;'),
-					[values[v+2]    ,values[v+3]].join('&nbsp;'),
-					'<sub>['+[r,c].join(',')+']</sub>',
+		for(let r=0; r<this.submissions[VERT].length && v<values.length; r++){
+			let row = [this.submissions[VERT][r].lexeme+'<sub>['+r+']</sub>'];
+			for(let c=0; c<this.submissions[HORIZ].length && v<values.length; c++){
+				let cell = Array.from(values.slice(v,v+4));
+				cell = cell.map(v=>{return +v;});
+				cell.push(cell[2]+cell[3]*256);
+				cell.splice(2,0,Math.floor(cell[1]%4));
+				cell[1] = Math.floor(cell[1]/4);
+				cell[0] -= 127;
+				cell = cell.map(v=>{return v.toString()});
+				cell = [
+					`<i>${cell[0]}</i>`,
+					`<i>${cell[1]} , ${cell[2]}</i>`,
+					`<i>${cell[3]}</i> + <i>${cell[4]}</i> = ${cell[5]}`,
+					`<sub>${dir[cell[2]]}[${[r,c].join(',')}]</sub>`,
 				].join('\n');
 				v += 4;
 				row.push(cell);
 			}
-			table.push(row.map((d)=>{return '<td style="border:1px solid black;">'+d+'</td>';}).join(''));
+			table.push(row.map((d)=>{return '<td>'+d+'</td>';}).join(''));
 		}
 		table = table.join('</tr><tr>');
 
-		this._html = "<table style='border:1px solid black;'><tr>"+table+"</tr></table>";
+		this._html = "<table><caption></caption><tbody><tr>"+table+"</tr></tbody></table>";
 		this._htmlN = (this._htmlN || 0) +1;
 
 		return this._html;
@@ -888,19 +899,10 @@ const gpuFragInit = (`
 	void main() {
 		vec4 w = texture2D(u_image, vec2(v_texCoord.x,0));
 		vec4 n = texture2D(u_image, vec2(0,v_texCoord.y));
+
 		float score = 0.0;
-		w *= 255.0;
-		n *= 255.0;
-		// exact match
-		//TODO: There is a bug visible in the 'bellican/coelicanth' compare where (4 == 3)
-		if(int(w.r) == int(n.b) && int(w.g) == int(n.a)){
-			score = scores.x;
-		}
-		// a mis-match
-		else{
-			score = scores.y;
-		}
-		gl_FragColor = vec4(score,0,score,0);
+		score = (w.rg == n.ba) ? scores.x : scores.y;
+		gl_FragColor = vec4(score,0,0,0);
 	}
 `);
 
@@ -915,6 +917,13 @@ const gpuFragSW = (`
 
 	// constants
 	uniform vec2 u_resolution;
+	/**
+	 * The scores object contains 4 values:
+	 * x: match
+	 * y: mismatch
+	 * z: skip
+	 * w: terminus
+	 */
 	uniform vec4 scores;
 
 	/*******************************************************
@@ -963,63 +972,74 @@ const gpuFragSW = (`
 		}
 
 		/*******************************/
-		// Get the running terminus
-
-		vec4 term  = vec4(0.0, n.g, w.g, nw.g);
-		term = floor((term * bitEnc.x) / 4.0);
 
 		// Find the max score from the chain
 		float nwScore = (nw.b*bitEnc.x) + (nw.a*bitEnc.y);
 		float wScore  = ( w.b*bitEnc.x) + ( w.a*bitEnc.y);
 		float nScore  = ( n.b*bitEnc.x) + ( n.a*bitEnc.y);
 		vec4 score = vec4(0.0, nScore, wScore, nwScore);
+		// and the terminus
+		vec4 term  = vec4(0.0, n.g, w.g, nw.g);
+		term = floor((term * bitEnc.x) / 4.0);
 
 		// pick the biggest of the highest score
 		score.x = max(score.x, score[1]);
 		score.x = max(score.x, score[2]);
 		score.x = max(score.x, score[3]);
+		term.x = score.x;
 
-		// Figure out what the directionality of the score was
+		// Figure out what the directionality of the score was, and get the 
+		// terminus that was associated with that
 		if(int(score.x) == int(score[3])){
 			dir = 3;
-			term.x = term[3];
+			term.yz *= 0.0;
 		}
 		else if(int(score.x) == int(score[2])){
 			dir = 2;
-			term.x = term[2];
+			term.yw *= 0.0;
 		}
 		else{
 			dir = 1;
-			term.x = term[1];
+			term.zw *= 0.0;
 		}
-		term.y = score.x;
 
-
-		// apply the skip penalty (we already removed it if it was NW)
+		// apply the skip penalty for non-diagonal
 		if(dir != 3){
 			score.x += scoresExpanded.z;
 		}
 		// add up our new score
 		score.x += (here.r*bitEnc.x)-127.0;
-
 		// clamp it to Zero
 		score.x = max(score.x , 0.0);
 		score.x = min(score.x , bitEnc.y);
 
-		// calcuate ther termination value
-		term.y -= score.x;
-		term.x += term.y;
-		if(term.y < 0.0){
-			term.x = 0.0;
-		}
-		if(term.x > score.w){
+		/*
+		 * calcuate ther termination value
+		 * 
+		 * The terminus is like a fuze. When it burns out 
+		 * the chain is assumed complete. We refuel the fuze
+		 * periodically
+		 * 
+		 */
+		// This is the difference between the new score (score.x) and 
+		// the old score in the chain (term.x).
+		term.x -= score.x * -1.0;
+		// If the local score was positive (a match), we reset the fuse
+		term.x = term.x + (scoresExpanded.w * ceil(here.r/256.0));
+		// This difference is then added to the running total (term@dir) 
+		// of the terminus and clamped.
+		term.x = term.x + term.y + term.z + term.w;
+		term.x = max(0.0, term.x);
+		term.x = min(scoresExpanded.w, term.x);
+		// if the fuze has run out, we need to terminate the chain and 
+		// scoring by zeroing out the score
+		if(term.x <= 0.0){
 			score.x = 0.0;
-			term.x = 0.0;
 		}
 
 		// place the result in the last two registers
-		here.b = score.x - (here.a*256.0);
 		here.a = floor(score.x / 256.0);
+		here.b = score.x - (here.a*256.0);
 
 		// encode the directionality and terminus in a single register
 		// direction

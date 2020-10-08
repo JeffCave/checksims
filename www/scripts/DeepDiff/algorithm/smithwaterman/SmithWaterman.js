@@ -140,8 +140,8 @@ async function ProcSW(req, progHandler=()=>{}) {
 					delete threads[req.name];
 					break;
 			}
-			if(msg.html){
-				document.querySelector('pre').innerHTML = msg.html;
+			if(msg.data.html){
+				document.querySelector('pre').innerHTML = msg.data.html;
 			}
 			handler(msg);
 		};

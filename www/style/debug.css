@@ -1,0 +1,43 @@
+pre#debug{
+	font-family:monospace;
+	font-weight: bold;
+	height: 0;
+	margin:0;
+	padding:0;
+	z-index: 10;
+}
+#debug table{
+	text-align:right;
+	border-collapse: collapse;
+}
+#debug table, #debug th, #debug td {
+	margin:1px;padding:1px;
+	border: 1px solid black;
+	white-space: pre;
+}
+#debug td.active{
+	background-color: skyblue;
+}
+#debug td > i{
+	 font-style: normal;
+}
+#debug td > i:nth-of-type(1), dt:nth-of-type(1){
+	color:red;
+}
+#debug td > i:nth-of-type(2), dt:nth-of-type(2){
+	color:green;
+}
+#debug td > i:nth-of-type(3), dt:nth-of-type(3){
+	color:blue;
+}
+#debug td > i:nth-of-type(4), dt:nth-of-type(4){
+	color:black;
+}
+/*
+#debug td > i:nth-of-type(2):after{
+	content:"\A";
+}
+*/
+#debug table > caption{
+	text-align:left;
+}
