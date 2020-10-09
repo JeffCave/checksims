@@ -84,22 +84,21 @@ export default class psSimilarityMap extends HTMLElement {
 		if(this.flip){
 			submissions.reverse();
 		}
+		let allchains = this.result.chains.slice(0,this.PalletteSize-1)
+			.sort((a,b)=>{
+				let sort = a.score-b.score;
+				if(sort === 0){
+					sort = a.id - b.id;
+				}
+				return sort;
+			});
 		for(let side of Array(2).keys()){
-			let chains = this.result.chains.slice(0,this.PalletteSize-1)
-				.sort((a,b)=>{
-					let sort = a.score-b.score;
-					if(sort === 0){
-						sort = a.id - b.id;
-					}
-					return sort;
-				})
-				.map((chain,c)=>{
-					let s = side;
+			let chains = allchains.map((chain,c)=>{
 					if(this.flip){
-						s = 1 - s;
+						side = 1 - side;
 					}
-					chain = chain.submissions[s];
-					let sub = submissions[s];
+					chain = chain.submissions[side];
+					let sub = submissions[side];
 					let rtn = {
 						start: sub.tokens[chain.first].range[0],
 						end: sub.tokens[chain.last].range[1],
@@ -131,26 +130,27 @@ export default class psSimilarityMap extends HTMLElement {
 
 				let segments = chains[section] || [];
 				let range = {
-					start: content.blob.length-1,
+					start: 0,
+					end:   0,
 					path: section
 				};
 				for(let seg = segments.pop() ; seg; seg = segments.pop()){
 					seg.end++;
 					let span = document.createTextNode('');
-					range.end = range.start;
-					range.start = seg.end;
+					range.end = seg.start;
 					span.textContent = submission.fetchSegment(range);
-					body.prepend(span);
+					body.append(span);
 					span = document.createElement('span');
 					span.textContent = submission.fetchSegment(seg);
 					span.dataset.chain = seg.i;
-					body.prepend(span);
+					body.append(span);
 					range = seg;
 				}
 				let span = document.createTextNode('');
-				range.end = range.start;
-				range.start = 0;
+				range.start = range.end;
+				range.end = content.blob.length-1;
 				span.textContent = submission.fetchSegment(range);
+				body.append(span);
 
 				body.dataset.file = section;
 				element.append(header);

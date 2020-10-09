@@ -16,12 +16,6 @@ export {
 	DeepDiff,
 };
 
-export {
-	DeepDiff as default,
-	DeepDiff,
-};
-
-
 /**
  * CLI Entry point and main public API endpoint for DeepDiff.
  */

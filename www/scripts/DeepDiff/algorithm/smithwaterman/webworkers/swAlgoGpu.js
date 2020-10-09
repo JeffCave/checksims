@@ -149,9 +149,8 @@ class swTiler extends SmithWatermanBase{
 			horizontal < this.submissions[HORIZ].tileLen
 			;
 		if(!isInBounds){
-			while(chains.length > 0) {
-				let val = chains.pop();
-				if(val.highscore > Number.MIN_SAFE_INTEGER){
+			for(let val = chains.pop(); val; val = chains.pop()) {
+				if(val.score > 0){
 					this.chains.set(val.i,val);
 				}
 			}
@@ -263,8 +262,10 @@ class swTiler extends SmithWatermanBase{
 						}
 					}
 
-					vMatch = chain.y === tile.segments[VERT].fin;
-					hMatch = chain.x === tile.segments[HORIZ].fin;
+					// if it made it all the way down the vertical length,
+					// it is touching the horizontal edge
+					hMatch = chain.y === tile.segments[VERT].fin;
+					vMatch = chain.x === tile.segments[HORIZ].fin;
 					if(vMatch && hMatch){
 						unfinished[DIAG].push(chain);
 					}
@@ -285,13 +286,17 @@ class swTiler extends SmithWatermanBase{
 					nw = JSON.parse(swTiler.TileEdgeDefault).pop();
 				}
 				nw = [nw];
-				let w  = JSON.parse(swTiler.TileEdgeDefault);
-				for(let loc of unfinished[HORIZ]){
-					w[loc.y] = loc;
-				}
+				// All of the items that are on the unfinished horizontal
+				// edge become the next northerly value
 				let n  = JSON.parse(swTiler.TileEdgeDefault);
+				for(let loc of unfinished[HORIZ]){
+					n[loc.y] = loc;
+				}
+				// All of the items that are on the unfinished vertical
+				// edge become the next westerly value
+				let w  = JSON.parse(swTiler.TileEdgeDefault);
 				for(let loc of unfinished[VERT]){
-					n[loc.x] = loc;
+					w[loc.x] = loc;
 				}
 
 				let x = tile.id[HORIZ], y = tile.id[VERT];
@@ -351,9 +356,7 @@ class swTiler extends SmithWatermanBase{
 			let sub = this.submissions[s].sub;
 			seg.start = tile.id[s] * this.TileSize;
 			seg.fin = seg.start + this.TileSize - 1;
-			// TODO: Investigate potential one off
-			//seg.fin = Math.min(sub.length,seg.fin) - 1;
-			seg.fin = Math.min(sub.length,seg.fin);
+			seg.fin = Math.min(sub.length,seg.fin) - 1;
 			seg.segment = sub.slice(seg.start,seg.fin+1);
 			for(let i=seg.segment.length-1; i>=0; i--){
 				let val = seg.segment[i];
@@ -374,7 +377,7 @@ class swTiler extends SmithWatermanBase{
 			let id = this.name + JSON.stringify(tile.id);
 			let v = segs[VERT].segment;
 			let h = segs[HORIZ].segment;
-			let opts = {};
+			let opts = {scores:this._.scores};
 			let gpu = new swAlgoGpu(id,v,h,opts);
 			gpu.addEventListener('msg', (msg)=>{
 				msg = msg.detail;
@@ -479,13 +482,13 @@ class swTiler extends SmithWatermanBase{
 				// that is still in the pool.
 				for(let link = chain.prev; link; link = link.prev){
 					if(! index.has(link.i)) continue;
-					if(link.score >= this.ScoreSignificant){
+					if(link.score >= ScoreSignificant){
 						chainstarts.push(link);
-						// naturally, the item we have just injected has a score 
+						// naturally, the item we have just injected has a score
 						// that will fix its position, so we need to re-sort the array
 						//
-						// if this happens a lot, we should search the array for the 
-						// insertion point ourselves, and then use `splice`. I'm not 
+						// if this happens a lot, we should search the array for the
+						// insertion point ourselves, and then use `splice`. I'm not
 						// convinced this happens frequently enough to warrant the change.
 						chainstarts = chainstarts.sort(chaincompare);
 					}
@@ -528,10 +531,10 @@ class swTiler extends SmithWatermanBase{
 			};
 			item = null;
 
-			/* 
-			 * We already know that this is going to have a signficant score. 
-			 * We checked that when determining if it should be considered teh 
-			 * start of a chain. 
+			/*
+			 * We already know that this is going to have a signficant score.
+			 * We checked that when determining if it should be considered teh
+			 * start of a chain.
 			 */
 			//if(chain.score >= this.ScoreSignificant){
 			//	resolved.push(chain);
@@ -565,7 +568,7 @@ swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize,0.5)),2);
 swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
 	.fill(0)
 	.map(()=>{
-		return {score:0,chain:[],highscore:Number.MIN_SAFE_INTEGER};
+		return {score:0,history:[]};
 	});
 swTiler.TileEdgeDefault = JSON.stringify(swTiler.TileEdgeDefault);
 
@@ -826,8 +829,8 @@ class swAlgoGpu extends SmithWatermanBase{
 		//		return ord;
 		//	})
 		//	;
-		this.postMessage({type:'progress', data:this.toJSON()});
 		this.remaining = 0;
+		this.postMessage({type:'progress', data:this.toJSON()});
 		this._chains = resolved;
 		return resolved;
 	}
@@ -988,7 +991,7 @@ const gpuFragSW = (`
 		score.x = max(score.x, score[3]);
 		term.x = score.x;
 
-		// Figure out what the directionality of the score was, and get the 
+		// Figure out what the directionality of the score was, and get the
 		// terminus that was associated with that
 		if(int(score.x) == int(score[3])){
 			dir = 3;
@@ -1015,23 +1018,23 @@ const gpuFragSW = (`
 
 		/*
 		 * calcuate ther termination value
-		 * 
-		 * The terminus is like a fuze. When it burns out 
+		 *
+		 * The terminus is like a fuze. When it burns out
 		 * the chain is assumed complete. We refuel the fuze
 		 * periodically
-		 * 
+		 *
 		 */
-		// This is the difference between the new score (score.x) and 
+		// This is the difference between the new score (score.x) and
 		// the old score in the chain (term.x).
 		term.x -= score.x * -1.0;
 		// If the local score was positive (a match), we reset the fuse
 		term.x = term.x + (scoresExpanded.w * ceil(here.r/256.0));
-		// This difference is then added to the running total (term@dir) 
+		// This difference is then added to the running total (term@dir)
 		// of the terminus and clamped.
 		term.x = term.x + term.y + term.z + term.w;
 		term.x = max(0.0, term.x);
 		term.x = min(scoresExpanded.w, term.x);
-		// if the fuze has run out, we need to terminate the chain and 
+		// if the fuze has run out, we need to terminate the chain and
 		// scoring by zeroing out the score
 		if(term.x <= 0.0){
 			score.x = 0.0;

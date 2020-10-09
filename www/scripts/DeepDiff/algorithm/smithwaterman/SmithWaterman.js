@@ -59,7 +59,7 @@ const scores = {
 	terminus: 5,
 	// the final score that is considered
 	// significant length.
-	significant: 20,
+	significant: 9,
 };
 
 
