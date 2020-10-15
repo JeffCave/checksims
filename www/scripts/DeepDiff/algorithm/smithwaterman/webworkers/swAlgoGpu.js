@@ -374,11 +374,9 @@ class swTiler extends SmithWatermanBase{
 		tile.lexememap = lexememap;
 		tile.segments = segs;
 		let p = new Promise((resolve)=>{
-			let id = this.name + JSON.stringify(tile.id);
-			let v = segs[VERT].segment;
-			let h = segs[HORIZ].segment;
+			tile.name = this.name + JSON.stringify(tile.id);
 			let opts = {scores:this._.scores};
-			let gpu = new swAlgoGpu(id,v,h,opts);
+			let gpu = new swAlgoGpu(tile,opts);
 			gpu.addEventListener('msg', (msg)=>{
 				msg = msg.detail;
 				if(msg.type === 'complete'){
@@ -563,6 +561,7 @@ class swTiler extends SmithWatermanBase{
 
 }
 swTiler.TileSize = 1024; //(2**(16-1)) - 2;
+swTiler.TileSize = 15; //(2**(16-1)) - 2;
 // turn size in to a power of two value to keep shaders happy
 swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize,0.5)),2);
 swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
@@ -575,21 +574,20 @@ swTiler.TileEdgeDefault = JSON.stringify(swTiler.TileEdgeDefault);
 // ---------------------------------------------------------------- //
 
 class swAlgoGpu extends SmithWatermanBase{
-	constructor(name, v, h, opts){
-		super(name,v,h,opts);
-		if(!v && !h && name.name){
-			v = name.submissions[VERT];
-			h = name.submissions[HORIZ];
-			name = name.name;
-		}
+	constructor(tile, opts){
+		super(tile.name,tile.segments[VERT].segment,tile.segments[HORIZ].segment,opts);
+
+		let v = tile.segments[VERT].segment;
+		let h = tile.segments[HORIZ].segment;
 		this.matrix = [];
 		this.partial = new Map();
 		this.finishedChains = [];
 
+		this.tile = tile;
 		this.name = name;
 		this.submissions = [];
-		this.submissions[VERT] = v;
-		this.submissions[HORIZ] = h;
+		this.submissions[VERT] = tile.segments[VERT].segment;
+		this.submissions[HORIZ] = tile.segments[HORIZ].segment;
 
 		this.cycles = v.length + h.length - 1;
 		this.remaining =
@@ -635,6 +633,26 @@ class swAlgoGpu extends SmithWatermanBase{
 		this.gpu.run('initializeSpace');
 		this.remaining--;
 		this.postMessage({type:'progress', data:this.toJSON()});
+
+		data = this.gpu.read(data);
+		function assignScore(src,i,pos){
+			let score = src[i].score;
+			if(score === 0) return data[pos];
+			score += data[pos];
+			score = Math.max(score,255);
+			data[pos] = score;
+			return score;
+		}
+		for(let i=0,pos=0; i < this.gpu.width; i++,pos+=4){
+			assignScore(this.tile.n,i,pos);
+		}
+		for(let i=0,pos=1; i < this.gpu.height; i++,pos+=(this.gpu.width*4)){
+			assignScore(this.tile.w,i,pos);
+		}
+		this.gpu.write(data);
+		this.remaining -= (this.gpu.width + this.gpu.height) + 1;
+		this.postMessage({type:'progress', data:this.toJSON()});
+
 	}
 
 	destroy(){
@@ -721,13 +739,25 @@ class swAlgoGpu extends SmithWatermanBase{
 	ResolveCandidates(){
 		if(this._chains) return this._chains;
 
+		const right = this.gpu.width-1;
+		const bottom = this.gpu.height-1;
+		const isPosSignificant = (item)=>{
+			let sig = item.score > 0 && (item.pos[HORIZ] === right || item.pos[VERT] === bottom);
+			return +sig;
+		};
+		const isSignificant = (item)=>{
+			let sig = item.score >= this.ScoreSignificant || isPosSignificant(item);
+			return +sig;
+		};
+
+
 		// Copy values out of the GPU data into a JS array, but skip anything
 		// that did not get a score at all.
 		let values = this.gpu.read();
 		let index = new Map();
 		for(let i=values.length-4; i>=0; i-=4){
 			let d = {
-				i:i,
+				i: Math.floor(i/4),
 				dir: values[i+1]
 			};
 			d.terminus = Math.floor(d.dir / 4);
@@ -736,12 +766,17 @@ class swAlgoGpu extends SmithWatermanBase{
 			d.score = new Uint16Array(values.buffer,i,2);
 			d.score = d.score[1];
 
-			if(d.score > 0){
-				index.set(d.i, d);
-			}
-			else{
+			if(d.score <= 0){
 				this.remaining--;
+				continue;
 			}
+
+			d.pos = [
+				Math.floor(d.i / this.gpu.width), //VERT
+				Math.floor(d.i % this.gpu.width) //HORIZ
+			];
+			index.set(d.i, d);
+
 		}
 		values = null;
 
@@ -754,7 +789,6 @@ class swAlgoGpu extends SmithWatermanBase{
 		* resolved - the list of chains that actually exist
 		*/
 		let resolved = [];
-		let chain = {score:Number.MAX_VALUE};
 		// This bugs me. There has got to be a way to pre-index this
 		// by score to allow us to rapidly find the best candidate.
 		//
@@ -765,17 +799,20 @@ class swAlgoGpu extends SmithWatermanBase{
 		// it is the one that moves down the ... I just don't know
 		// ... but its wrong
 		let chainstarts = Array.from(index.values())
+			.filter(isSignificant)
 			.sort((a,b)=>{
-				let ord = a.score - b.score;
-				if(ord === 0){
-					ord = b.i - a.i;
-				}
+				let ord = 0;
+				ord += 1000 * (isPosSignificant(a) - isPosSignificant(b));
+				ord += 100  * (a.score - b.score);
+				ord += 10   * (b.i - a.i);
 				return ord;
 			});
 
-		while(index.size > 0 && chain.score >= this.ScoreSignificant){
-			chain = chainstarts.pop();
-			// So this should not be checked here. Because this spans multiple tiles, it is possible that a low scoring chain will score better in a future tile.
+		for(let chain = chainstarts.pop(); index.size > 0 && chain; chain = chainstarts.pop()){
+			// This should not be checked here. Because this spans multiple
+			// tiles, it is possible that a low scoring chain will score
+			// better in a future tile.
+			//
 			//if(! index.has(chain.i)){
 			//	// This would indicate that the item we retrieved from the sorted
 			//	// array was removed from the master index. That means it was
@@ -791,14 +828,14 @@ class swAlgoGpu extends SmithWatermanBase{
 			this.remaining = index.size;
 			this.postMessage({type:'progress', data:this.toJSON()});
 
-			// construct teh chain's history
+			// construct the chain's history
 			chain.history = [];
 			for(let item = chain; item; item = index.get(item.prev)){
 				chain.history.push(item);
 				index.delete(item.i);
 
-				item.x = Math.floor(item.i/4)%this.gpu.width;
-				item.y = Math.floor(Math.floor(item.i/4)/this.gpu.width);
+				item.x = item.pos[HORIZ];
+				item.y = item.pos[VERT];
 
 				// map the next node in the chain. This is done by
 				// 1. finding the directional component
@@ -806,14 +843,28 @@ class swAlgoGpu extends SmithWatermanBase{
 				// 2. take the current position
 				item.prev = item.i;
 				// 3. find the directional offset along the X
-				item.prev -= md[0] * 1 * 4;
+				item.prev -= md[0];
 				// 4. find the directional offset along the Y
-				item.prev -= md[1] * this.gpu.width * 4;
+				item.prev -= md[1] * this.gpu.width;
 			}
 
-			let finItem = chain.history[chain.history.length-1];
-			chain.score -= Math.max(0,finItem.score-this.ScoreMatch);
-			if(chain.score >= this.ScoreSignificant){
+			/*
+			 * In the case where two chains intersect, the less valuable chain is trimmed. This act of trimming means that the chain has lost some of its scoring cells.
+			 *
+			 * To adjust the score to reflect this, we look up the score at the last cell in the chain, it will be the aggregate of everything that came before. Simply subtracting this score from the chain's score will result in rebalancing the score to reflect the chain's value.
+			 */
+			let trimscore = chain.history[chain.history.length-1];
+			if(trimscore.x !== 0 && trimscore.y !== 0){
+				trimscore = Math.max(0,trimscore.score-this.ScoreMatch);
+				if(trimscore) {
+					for(let item of chain.history){
+						item.score = Math.max(0,item.score - trimscore);
+					}
+				}
+			}
+
+			// If this is a relevant chain, we should capture it
+			if(isSignificant(chain)){
 				resolved.push(chain);
 			}
 		}
