@@ -251,11 +251,18 @@ class swTiler extends SmithWatermanBase{
 					let vMatch = null;
 					let hMatch = null;
 
+					// Check to see if the chain traces all the way back 
+					// to the beginning of the tile. This would mean that 
+					// it could be a continuation of an existing chain and 
+					// we should link the fragment we just received with 
+					// the earlier part.
 					let last = chain.history[chain.history.length-1];
 					vMatch = last.y === tile.segments[VERT].start;
 					hMatch = last.x === tile.segments[HORIZ].start;
+					// touches edge?
 					if(vMatch || hMatch){
 						let link = this.chains.get(chain.i);
+						// earlier chain?
 						if(link){
 							this.chains.delete(link);
 							chain.history = chain.history.concat(link);
@@ -263,7 +270,8 @@ class swTiler extends SmithWatermanBase{
 					}
 
 					// if it made it all the way down the vertical length,
-					// it is touching the horizontal edge
+					// it is touching the horizontal edge (and vis-a-versa). 
+					// It will therefore need to be passed to the next tile.
 					hMatch = chain.y === tile.segments[VERT].fin;
 					vMatch = chain.x === tile.segments[HORIZ].fin;
 					if(vMatch && hMatch){
@@ -275,7 +283,11 @@ class swTiler extends SmithWatermanBase{
 					else if(hMatch){
 						unfinished[HORIZ].push(chain);
 					}
-					else{
+					// add it to our list of chains we have. It may be 
+					// incomplete, but that's OK, the next block will 
+					// start the next tile. When that tile completes, 
+					// the above code will link this to that tile.
+					if(vMatch || hMatch || chain.score >= this.ScoreSignificant){
 						this.chains.set(chain.i,chain);
 					}
 				}
@@ -382,6 +394,7 @@ class swTiler extends SmithWatermanBase{
 				if(msg.type === 'complete'){
 					let c = msg.data.chains;
 					resolve(c);
+					gpu.destroy();
 				}
 				else if (msg.type ==='progress'){
 					this.partialProgress  = msg.data.totalSize;
@@ -560,10 +573,17 @@ class swTiler extends SmithWatermanBase{
 	}
 
 }
-swTiler.TileSize = 1024; //(2**(16-1)) - 2;
-swTiler.TileSize = 15; //(2**(16-1)) - 2;
+// The tilesize should be 0.5GB for compliance with memory on the OrangePi's GPU
+// 1GB => 1073741824bytes
+// 1073741824 bytes / 2 => 536870912 bytes (0.5 GB)
+// 536870912 / 4 bytesPerCell => 134217728 cells 
+// 134217728 cells ^ 0.5 => 11585 per side 
+// ... which fits comfortably within a 16bit integer
+swTiler.TileSize = 11585; 
+// DEBUG: this should be set to a larger number 
+swTiler.TileSize = 15; 
 // turn size in to a power of two value to keep shaders happy
-swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize,0.5)),2);
+swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize-1,0.5)),2);
 swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
 	.fill(0)
 	.map(()=>{
@@ -635,20 +655,26 @@ class swAlgoGpu extends SmithWatermanBase{
 		this.postMessage({type:'progress', data:this.toJSON()});
 
 		data = this.gpu.read(data);
-		function assignScore(src,i,pos){
+		function assignScore(src,i,pos,dir){
 			let score = src[i].score;
 			if(score === 0) return data[pos];
-			score += data[pos];
-			score = Math.max(score,255);
-			data[pos] = score;
+			if(score > (data[pos]-127)){
+				score += data[pos];
+				score = Math.min(score,255);
+				data[pos] = score;
+				// there is a slight difference between the definition of VERT/HORIZ/DIAG on the GPU and here
+				dir += 1;
+				data[pos+1] = Math.floor(data[pos+1]/4)*4 + dir;
+			}
 			return score;
 		}
 		for(let i=0,pos=0; i < this.gpu.width; i++,pos+=4){
-			assignScore(this.tile.n,i,pos);
+			assignScore(this.tile.n,i,pos,VERT);
 		}
-		for(let i=0,pos=1; i < this.gpu.height; i++,pos+=(this.gpu.width*4)){
-			assignScore(this.tile.w,i,pos);
+		for(let i=0,pos=0; i < this.gpu.height; i++,pos+=(this.gpu.width*4)){
+			assignScore(this.tile.w,i,pos,HORIZ);
 		}
+		assignScore([this.tile.nw],0,0,DIAG);
 		this.gpu.write(data);
 		this.remaining -= (this.gpu.width + this.gpu.height) + 1;
 		this.postMessage({type:'progress', data:this.toJSON()});
@@ -849,12 +875,21 @@ class swAlgoGpu extends SmithWatermanBase{
 			}
 
 			/*
-			 * In the case where two chains intersect, the less valuable chain is trimmed. This act of trimming means that the chain has lost some of its scoring cells.
+			 * In the case where two chains intersect, the less valuable chain is 
+			 * trimmed. This act of trimming means that the chain has lost some 
+			 * of its scoring cells.
 			 *
-			 * To adjust the score to reflect this, we look up the score at the last cell in the chain, it will be the aggregate of everything that came before. Simply subtracting this score from the chain's score will result in rebalancing the score to reflect the chain's value.
+			 * To adjust the score to reflect this, we look up the score at the 
+			 * last cell in the chain, it will be the aggregate of everything that 
+			 * came before. Simply subtracting this score from the chain's score 
+			 * will result in rebalancing the score to reflect the chain's value.
 			 */
 			let trimscore = chain.history[chain.history.length-1];
-			if(trimscore.x !== 0 && trimscore.y !== 0){
+			if(trimscore.x !== 0 && trimscore.y !== 0 && !isPosSignificant(chain)){
+				// subtracking ScoreMatch is not accurate. Really, this 
+				// should be subtract the score that came from teh previous 
+				// item in the chain. Unfortunately, that has information 
+				// has been lost, so subtracting ScoreMatch is a simple proxy
 				trimscore = Math.max(0,trimscore.score-this.ScoreMatch);
 				if(trimscore) {
 					for(let item of chain.history){
@@ -980,6 +1015,8 @@ const gpuFragSW = (`
 	 */
 	uniform vec4 scores;
 
+	const vec4 pixNull = vec4(0.0,0.0,0.0,0.0);
+
 	/*******************************************************
 	 * Encode values across vector positions
 	 *
@@ -987,6 +1024,7 @@ const gpuFragSW = (`
 	 */
 	const vec4 bitEnc = vec4(255.0, 65535.0, 16777215.0, 4294967295.0);
 	const vec4 bitDec = 1.0/bitEnc;
+
 	vec4 EncodeFloatRGBA (float v) {
 		vec4 enc = bitEnc * v;
 		enc = fract(enc);
@@ -1000,6 +1038,20 @@ const gpuFragSW = (`
 	 *
 	 *******************************************************/
 
+	/**
+	 * TODO: Given a directional parent, and teh current value, return the 
+	 * new value
+	 * 
+	 * The idea is that we can calculate the the potential result for a 
+	 * direction and return the results.
+	 * 
+	 * It is hoped that the result can then be compared with other results 
+	 * to for the best candidate to be chosen.
+	 */
+	vec4 ApplyParent(vec4 here, vec4 parent, float dir){
+		vec4 child = pixNull;
+		return child;
+	}
 
 	void main() {
 		int dir = 0;
@@ -1007,7 +1059,6 @@ const gpuFragSW = (`
 		vec4 scoresExpanded = (scores*bitEnc.x)-127.0;
 		// calculate the size of a pixel
 		vec2 pixSize = vec2(1.0, 1.0) / u_resolution;
-		vec4 pixNull = vec4(0.0,0.0,0.0,0.0);
 
 		// find our four critical points
 		vec4 here = texture2D(u_image, v_texCoord);
@@ -1068,7 +1119,7 @@ const gpuFragSW = (`
 		score.x = min(score.x , bitEnc.y);
 
 		/*
-		 * calcuate ther termination value
+		 * calcuate the termination value
 		 *
 		 * The terminus is like a fuze. When it burns out
 		 * the chain is assumed complete. We refuel the fuze
