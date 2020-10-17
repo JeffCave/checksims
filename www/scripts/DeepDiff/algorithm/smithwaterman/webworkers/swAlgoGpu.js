@@ -251,10 +251,10 @@ class swTiler extends SmithWatermanBase{
 					let vMatch = null;
 					let hMatch = null;
 
-					// Check to see if the chain traces all the way back 
-					// to the beginning of the tile. This would mean that 
-					// it could be a continuation of an existing chain and 
-					// we should link the fragment we just received with 
+					// Check to see if the chain traces all the way back
+					// to the beginning of the tile. This would mean that
+					// it could be a continuation of an existing chain and
+					// we should link the fragment we just received with
 					// the earlier part.
 					let last = chain.history[chain.history.length-1];
 					vMatch = last.y === tile.segments[VERT].start;
@@ -270,22 +270,22 @@ class swTiler extends SmithWatermanBase{
 					}
 
 					// if it made it all the way down the vertical length,
-					// it is touching the horizontal edge (and vis-a-versa). 
+					// it is touching the horizontal edge (and vis-a-versa).
 					// It will therefore need to be passed to the next tile.
 					hMatch = chain.y === tile.segments[VERT].fin;
 					vMatch = chain.x === tile.segments[HORIZ].fin;
 					if(vMatch && hMatch){
 						unfinished[DIAG].push(chain);
 					}
-					else if(vMatch){
+					if(vMatch){
 						unfinished[VERT].push(chain);
 					}
-					else if(hMatch){
+					if(hMatch){
 						unfinished[HORIZ].push(chain);
 					}
-					// add it to our list of chains we have. It may be 
-					// incomplete, but that's OK, the next block will 
-					// start the next tile. When that tile completes, 
+					// add it to our list of chains we have. It may be
+					// incomplete, but that's OK, the next block will
+					// start the next tile. When that tile completes,
 					// the above code will link this to that tile.
 					if(vMatch || hMatch || chain.score >= this.ScoreSignificant){
 						this.chains.set(chain.i,chain);
@@ -302,13 +302,13 @@ class swTiler extends SmithWatermanBase{
 				// edge become the next northerly value
 				let n  = JSON.parse(swTiler.TileEdgeDefault);
 				for(let loc of unfinished[HORIZ]){
-					n[loc.y] = loc;
+					n[loc.x] = loc;
 				}
 				// All of the items that are on the unfinished vertical
 				// edge become the next westerly value
 				let w  = JSON.parse(swTiler.TileEdgeDefault);
 				for(let loc of unfinished[VERT]){
-					w[loc.x] = loc;
+					w[loc.y] = loc;
 				}
 
 				let x = tile.id[HORIZ], y = tile.id[VERT];
@@ -394,7 +394,7 @@ class swTiler extends SmithWatermanBase{
 				if(msg.type === 'complete'){
 					let c = msg.data.chains;
 					resolve(c);
-					gpu.destroy();
+					//gpu.destroy();
 				}
 				else if (msg.type ==='progress'){
 					this.partialProgress  = msg.data.totalSize;
@@ -576,12 +576,12 @@ class swTiler extends SmithWatermanBase{
 // The tilesize should be 0.5GB for compliance with memory on the OrangePi's GPU
 // 1GB => 1073741824bytes
 // 1073741824 bytes / 2 => 536870912 bytes (0.5 GB)
-// 536870912 / 4 bytesPerCell => 134217728 cells 
-// 134217728 cells ^ 0.5 => 11585 per side 
+// 536870912 / 4 bytesPerCell => 134217728 cells
+// 134217728 cells ^ 0.5 => 11585 per side
 // ... which fits comfortably within a 16bit integer
-swTiler.TileSize = 11585; 
-// DEBUG: this should be set to a larger number 
-swTiler.TileSize = 15; 
+swTiler.TileSize = 11585;
+// DEBUG: this should be set to a larger number
+swTiler.TileSize = 15;
 // turn size in to a power of two value to keep shaders happy
 swTiler.TileSize = Math.pow(Math.floor(Math.pow(swTiler.TileSize-1,0.5)),2);
 swTiler.TileEdgeDefault = new Array(swTiler.TileSize)
@@ -875,20 +875,20 @@ class swAlgoGpu extends SmithWatermanBase{
 			}
 
 			/*
-			 * In the case where two chains intersect, the less valuable chain is 
-			 * trimmed. This act of trimming means that the chain has lost some 
+			 * In the case where two chains intersect, the less valuable chain is
+			 * trimmed. This act of trimming means that the chain has lost some
 			 * of its scoring cells.
 			 *
-			 * To adjust the score to reflect this, we look up the score at the 
-			 * last cell in the chain, it will be the aggregate of everything that 
-			 * came before. Simply subtracting this score from the chain's score 
+			 * To adjust the score to reflect this, we look up the score at the
+			 * last cell in the chain, it will be the aggregate of everything that
+			 * came before. Simply subtracting this score from the chain's score
 			 * will result in rebalancing the score to reflect the chain's value.
 			 */
 			let trimscore = chain.history[chain.history.length-1];
 			if(trimscore.x !== 0 && trimscore.y !== 0 && !isPosSignificant(chain)){
-				// subtracking ScoreMatch is not accurate. Really, this 
-				// should be subtract the score that came from teh previous 
-				// item in the chain. Unfortunately, that has information 
+				// subtracking ScoreMatch is not accurate. Really, this
+				// should be subtract the score that came from teh previous
+				// item in the chain. Unfortunately, that has information
 				// has been lost, so subtracting ScoreMatch is a simple proxy
 				trimscore = Math.max(0,trimscore.score-this.ScoreMatch);
 				if(trimscore) {
@@ -1039,13 +1039,13 @@ const gpuFragSW = (`
 	 *******************************************************/
 
 	/**
-	 * TODO: Given a directional parent, and teh current value, return the 
+	 * TODO: Given a directional parent, and teh current value, return the
 	 * new value
-	 * 
-	 * The idea is that we can calculate the the potential result for a 
+	 *
+	 * The idea is that we can calculate the the potential result for a
 	 * direction and return the results.
-	 * 
-	 * It is hoped that the result can then be compared with other results 
+	 *
+	 * It is hoped that the result can then be compared with other results
 	 * to for the best candidate to be chosen.
 	 */
 	vec4 ApplyParent(vec4 here, vec4 parent, float dir){
